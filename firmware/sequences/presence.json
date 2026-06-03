@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "totalDuration": 10000,
+  "tracks": {
+    "L": [
+      {
+        "startTime": 0,
+        "presetId": 1
+      },
+      {
+        "startTime": 736,
+        "presetId": 1
+      },
+      {
+        "startTime": 1387,
+        "presetId": 1
+      },
+      {
+        "startTime": 1823,
+        "presetId": 1
+      },
+      {
+        "startTime": 2064,
+        "presetId": 1
+      },
+      {
+        "startTime": 2214,
+        "presetId": 1
+      },
+      {
+        "startTime": 2322,
+        "presetId": 1
+      },
+      {
+        "startTime": 2410,
+        "presetId": 1
+      },
+      {
+        "startTime": 2489,
+        "presetId": 1
+      },
+      {
+        "startTime": 2564,
+        "presetId": 1
+      },
+      {
+        "startTime": 2640,
+        "presetId": 1
+      },
+      {
+        "startTime": 2723,
+        "presetId": 1
+      },
+      {
+        "startTime": 2819,
+        "presetId": 1
+      },
+      {
+        "startTime": 2935,
+        "presetId": 1
+      },
+      {
+        "startTime": 3084,
+        "presetId": 1
+      },
+      {
+        "startTime": 3288,
+        "presetId": 1
+      },
+      {
+        "startTime": 3577,
+        "presetId": 1
+      },
+      {
+        "startTime": 3998,
+        "presetId": 1
+      },
+      {
+        "startTime": 4579,
+        "presetId": 1
+      },
+      {
+        "startTime": 5500,
+        "presetId": 15
+      },
+      {
+        "startTime": 8100,
+        "presetId": 16
+      }
+    ],
+    "R": [
+      {
+        "startTime": 0,
+        "presetId": 1
+      },
+      {
+        "startTime": 736,
+        "presetId": 1
+      },
+      {
+        "startTime": 1387,
+        "presetId": 1
+      },
+      {
+        "startTime": 1823,
+        "presetId": 1
+      },
+      {
+        "startTime": 2064,
+        "presetId": 1
+      },
+      {
+        "startTime": 2214,
+        "presetId": 1
+      },
+      {
+        "startTime": 2322,
+        "presetId": 1
+      },
+      {
+        "startTime": 2410,
+        "presetId": 1
+      },
+      {
+        "startTime": 2489,
+        "presetId": 1
+      },
+      {
+        "startTime": 2564,
+        "presetId": 1
+      },
+      {
+        "startTime": 2640,
+        "presetId": 1
+      },
+      {
+        "startTime": 2723,
+        "presetId": 1
+      },
+      {
+        "startTime": 2819,
+        "presetId": 1
+      },
+      {
+        "startTime": 2935,
+        "presetId": 1
+      },
+      {
+        "startTime": 3084,
+        "presetId": 1
+      },
+      {
+        "startTime": 3288,
+        "presetId": 1
+      },
+      {
+        "startTime": 3577,
+        "presetId": 1
+      },
+      {
+        "startTime": 3998,
+        "presetId": 1
+      },
+      {
+        "startTime": 4579,
+        "presetId": 1
+      },
+      {
+        "startTime": 5500,
+        "presetId": 15
+      },
+      {
+        "startTime": 8100,
+        "presetId": 16
+      }
+    ]
+  }
+}

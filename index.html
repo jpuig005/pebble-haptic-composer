@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pebble Haptic Composer - Dual-Actuator Sequencer</title>
+  <!-- Outfit Google Font for a modern premium styling -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+  <!-- Premium Header Panel -->
+  <header>
+    <div class="brand">
+      <!-- Elegant Brain + Circuit Instrument Logo -->
+      <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--color-amber)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 4px var(--color-amber-glow)); margin-right: 8px;">
+        <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-4.12 2.5 2.5 0 0 1 0-4.88A2.5 2.5 0 0 1 9.5 2z"/>
+        <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-4.12 2.5 2.5 0 0 0 0-4.88A2.5 2.5 0 0 0 14.5 2z"/>
+        <line x1="12" y1="7" x2="16" y2="7" stroke-dasharray="1 2" stroke="var(--text-muted)"/>
+        <line x1="12" y1="12" x2="8" y2="12" stroke-dasharray="1 2" stroke="var(--text-muted)"/>
+      </svg>
+      <div>
+        <h1 style="font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 18px; color: var(--text-primary); letter-spacing: -0.2px;">
+          Breathing Pebble Composer
+        </h1>
+        <div style="font-size: 9.5px; color: var(--text-secondary); margin-top: 1px; font-weight: 500; letter-spacing: 0.8px; text-transform: uppercase;">
+          <span style="color: var(--color-amber); font-weight: 600;">Gadgets for Your Psyche</span>
+        </div>
+      </div>
+      <span style="margin-left: 12px; background: rgba(229, 169, 59, 0.05); border: 1px solid rgba(229, 169, 59, 0.2); color: var(--color-amber); font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px; text-transform: uppercase;">v1.1.0</span>
+    </div>
+
+    <!-- Web Serial Connective Controls -->
+    <div class="connection-panel">
+      <div id="connectionStatus" class="status-dot"></div>
+      <select id="serialPorts" style="display: none;">
+        <option value="">Auto-Detect Port</option>
+      </select>
+      <button id="syncBtn" class="btn" style="display: none; background: rgba(229, 169, 59, 0.08); border-color: rgba(229, 169, 59, 0.25); color: var(--color-amber); font-weight: 600; box-shadow: 0 0 8px rgba(229, 169, 59, 0.15);">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Sync to Pebble
+      </button>
+      <button id="connectBtn" class="btn btn-primary">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+        Connect Hardware
+      </button>
+    </div>
+  </header>
+
+  <!-- Master Split columns -->
+  <main>
+    <!-- Left Sidebar: Library / Generator -->
+    <section class="panel" id="leftPanel">
+      <div class="panel-header">
+        <h2 id="leftPanelHeader">Preset Library</h2>
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary);"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+      </div>
+
+
+      
+      <!-- Preset List (Manual Mode) -->
+      <div class="panel-scrollable" id="presetsLibrary">
+        <div style="color: var(--text-muted); text-align: center; margin-top: 40px; font-size: 13px;">Loading baseline library...</div>
+      </div>
+
+      <!-- Frequency Generator Controls (Curve Mode) -->
+      <div class="panel-scrollable" id="generatorSidebar" style="display: none; flex-direction: column; gap: 16px;">
+        <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; background: rgba(229, 169, 59, 0.05); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px dashed rgba(229, 169, 59, 0.2); margin-bottom: 8px;">
+          🌊 <strong>Frequency Mode:</strong> Timeline haptic blocks are calculated mathematically based on the pacer curve envelope below.
+        </div>
+
+        <div class="form-group">
+          <label for="breathPreset">Biological Breath Protocols</label>
+          <select id="breathPreset">
+            <option value="custom" selected>Custom Envelope (Manual Controls)</option>
+            <option value="relax">Relax Pacer (4s Inhale / 6s Exhale)</option>
+            <option value="box">Box Breathing (4s In, 4s Hold, 4s Out, 4s Hold)</option>
+            <option value="energize">Energizing Pulse (2s Inhale / 2s Exhale)</option>
+            <option value="calm">Decelerating Heartbeat (Heart Rate Coherency)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="curveShape">Pacing Curve Envelope</label>
+          <select id="curveShape">
+            <option value="gaussian">Gaussian Bell (Breathing Cycle)</option>
+            <option value="sine">Sine Wave (Pulsing Rhythms)</option>
+            <option value="linear">Linear Ramp (Acceleration / Sweep)</option>
+            <option value="custom">DAW Canvas (Click & Drag Nodes) 🎛️</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="curveBaseInterval">Base Interval (ms)</label>
+          <input type="number" id="curveBaseInterval" value="1200" min="300" max="4000" step="50" style="font-family: monospace;">
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 1px;">Starting slow interval between triggers</div>
+        </div>
+
+        <div class="form-group">
+          <label for="curvePeakInterval">Crest Peak Interval (ms)</label>
+          <input type="number" id="curvePeakInterval" value="200" min="50" max="1500" step="50" style="font-family: monospace;">
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 1px;">Fastest pacing speed at the crest peak</div>
+        </div>
+
+        <div class="form-group">
+          <label for="curveCrestPosition">Crest / Peak Position (%)</label>
+          <input type="range" id="curveCrestPosition" min="0.1" max="0.9" step="0.05" value="0.4" class="zoom-slider" style="width: 100%; accent-color: var(--color-cyan);">
+          <div style="font-size: 11px; display: flex; justify-content: space-between; color: var(--text-secondary); font-family: monospace; margin-top: 2px;">
+            <span>Start (10%)</span>
+            <span id="crestPosDisplay" style="color: var(--color-cyan); font-weight: 600;">40%</span>
+            <span>End (90%)</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="curveRouting">Channel Track Routing</label>
+          <select id="curveRouting">
+            <option value="alternate">Alternate Thumb & Index Tracks</option>
+            <option value="both">Synchronize Both Tracks</option>
+            <option value="L">Index LRA Only</option>
+            <option value="R">Thumb LRA Only</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="flex-direction: row; align-items: center; gap: 8px; padding: 4px 0;">
+          <input type="checkbox" id="curveDynamicIntensity" style="width: auto; cursor: pointer; margin: 0;">
+          <label for="curveDynamicIntensity" style="margin-bottom: 0; cursor: pointer; text-transform: none; font-size: 12px; font-weight: 500;">Dynamic Intensity Sweeps (Crescendo)</label>
+        </div>
+
+        <div class="form-group">
+          <label for="curvePreset">Generated Waveform Trigger</label>
+          <select id="curvePreset" style="font-size: 12px; font-family: monospace;">
+            <!-- Dynamically populated categories of all 123 presets -->
+          </select>
+        </div>
+
+        <!-- Generator Waveform Visualizer Canvas -->
+        <div class="form-group">
+          <label>Trigger Waveform Profile</label>
+          <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 8px; display: flex; align-items: center; justify-content: center;">
+            <canvas id="generatorWaveformCanvas" width="280" height="70" style="width: 100%; height: 70px; display: block;"></canvas>
+          </div>
+        </div>
+
+        <!-- Saved Sequences DB Section (Persistent LocalStorage Vault) -->
+        <div style="margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 12px;" id="dbLibrarySection">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <h3 style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary);">Saved Sequences Vault</h3>
+            <button id="saveToDbBtn" class="btn" style="padding: 4px 8px; font-size: 10.5px; margin-top: 0; background: rgba(229, 169, 59, 0.08); border-color: rgba(229, 169, 59, 0.2); color: var(--color-amber); font-weight: 600;">Save Current</button>
+          </div>
+          <div id="savedSequencesList" style="display: flex; flex-direction: column; gap: 8px; max-height: 140px; overflow-y: auto; padding-right: 2px;">
+            <div style="color: var(--text-muted); font-size: 11px; text-align: center; padding: 10px 0;">Vault is empty. Save a sequence to register it!</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Center Timeline workspace -->
+    <section class="sequencer-area">
+      <!-- Transport controls -->
+      <div class="transport-bar">
+        <!-- Mode Switcher -->
+        <div style="display: flex; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); padding: 4px; border-radius: var(--radius-sm); gap: 4px;">
+          <button id="modeManualBtn" class="btn btn-primary" style="padding: 6px 12px; font-size: 12px; box-shadow: none; border-radius: 4px; font-weight: 600;">Manual Grid</button>
+          <button id="modeCurveBtn" class="btn" style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 4px; background: transparent; color: var(--text-secondary);">🌊 Curve Gen</button>
+        </div>
+
+        <div class="playback-controls">
+          <button id="playBtn" class="btn-transport play" title="Play Sequence">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </button>
+          <button id="stopBtn" class="btn-transport stop" title="Stop Playback">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+          </button>
+          <button id="loopBtn" class="btn-transport btn-transport-secondary loop-active" title="Toggle Looping">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2.059A10.001 10.001 0 0 0 5 12h3l-4 4-4-4h3a10 10 0 1 1 17 0h-3l4 4 4-4h-3a10.005 10.005 0 0 0-4-9.941Z"/></svg>
+          </button>
+          <button id="recordBtn" class="btn-transport" style="color: var(--color-ruby); border-color: rgba(255, 59, 48, 0.15); background: transparent;" title="Record Live Keyboard (A/D Keys)">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
+          </button>
+        </div>
+
+        <div class="timing-controls">
+          <div class="timing-input-group">
+            <label for="sequenceLength">Seq Length</label>
+            <input type="number" id="sequenceLength" value="1.0" min="0.2" max="30.0" step="0.1">
+            <span>sec</span>
+          </div>
+          <div class="timing-divider"></div>
+          <div class="timing-input-group">
+            <label for="snapResolution">Snap Grid</label>
+            <select id="snapResolution" style="padding: 6px 12px; font-size: 13px; cursor: pointer;">
+              <option value="25">25ms</option>
+              <option value="50">50ms</option>
+              <option value="100" selected>100ms</option>
+              <option value="200">200ms</option>
+              <option value="250">250ms</option>
+            </select>
+          </div>
+          <div class="timing-divider"></div>
+          <div class="timing-input-group">
+            <label for="zoomSlider">Zoom</label>
+            <input type="range" id="zoomSlider" min="0.05" max="2.0" step="0.05" value="0.8" class="zoom-slider" title="Horizontal Zoom Factor">
+          </div>
+        </div>
+
+        <!-- Global Save/Import files -->
+        <div class="file-actions">
+          <button id="clearBtn" class="btn btn-delete" style="margin-top: 0; background: rgba(255, 59, 48, 0.08); border-color: rgba(255, 59, 48, 0.2); font-weight: 600;">Clear Grid</button>
+          <button id="importBtn" class="btn">Import JSON</button>
+          <button id="exportBtn" class="btn btn-primary" style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); color: white; box-shadow: none;">Export JSON</button>
+          <input type="file" id="fileInput" accept=".json" style="display: none;">
+        </div>
+      </div>
+
+      <!-- Scrollable Tracks Workspace -->
+      <div class="timeline-workspace-container">
+        <div class="timeline-grid-wrapper">
+          
+          <!-- Ruler -->
+          <div class="time-ruler" id="timeRuler">
+            <div class="ruler-spacer"></div>
+            <div class="ruler-content" id="rulerContent">
+              <svg id="rulerCurveSvg" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; opacity: 0; transition: opacity 0.3s ease;">
+                <path id="rulerCurvePath" d="" fill="none" stroke="var(--color-cyan)" stroke-width="2.5" style="filter: drop-shadow(0 0 6px var(--color-cyan-glow));"></path>
+                <g id="rulerCurvePoints"></g>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Sweeping playhead vertical overlay line -->
+          <div class="playhead" id="timelinePlayhead"></div>
+
+          <!-- Thumb LRA Right Track -->
+          <div class="track right-actuator" id="rightTrack">
+            <div class="track-header right-actuator">
+              <div class="track-name">Thumb LRA</div>
+            </div>
+            <div class="track-content">
+              <div class="track-grid-overlay"></div>
+              <!-- Placed nodes append here -->
+            </div>
+          </div>
+
+          <!-- Index LRA Left Track -->
+          <div class="track left-actuator" id="leftTrack">
+            <div class="track-header left-actuator">
+              <div class="track-name">Index LRA</div>
+            </div>
+            <div class="track-content">
+              <div class="track-grid-overlay"></div>
+              <!-- Placed nodes append here -->
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Sidebar: Selected Node Inspector & Modifiers -->
+    <section class="panel" style="border-right: none; border-left: 1px solid var(--border-color);" id="inspectorPanel">
+      <div class="panel-header">
+        <h2>Node Inspector</h2>
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary);"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      </div>
+      <div class="panel-scrollable" style="display: flex; flex-direction: column;">
+        
+        <!-- Empty Selection Slate -->
+        <div class="inspector-empty" id="inspectorEmpty">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 8-6 6-6-6"/></svg>
+          <p>Arrange nodes on the timeline and select one to modify its parameters.</p>
+          <div class="alert-bar" style="text-align: left; font-size: 11px;">
+            💡 <strong>Quick tip:</strong> You can drag presets from the library and drop them directly onto the tracks, or click inside a track grid to drop one immediately!
+          </div>
+        </div>
+
+        <!-- Active modifier controls form -->
+        <div class="inspector-form" id="inspectorForm" style="display: none;">
+          <div class="form-group">
+            <label>Waveform Preset Family</label>
+            <div style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 2px;" id="nodePresetFamily">Strong Click</div>
+            <div style="font-size: 11px; color: var(--text-secondary); font-family: monospace;" id="nodePresetMeta">DRV2605 ID: 1</div>
+          </div>
+
+          <!-- Waveform Visualizer Canvas -->
+          <div class="form-group">
+            <label>Waveform Physical Profile</label>
+            <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 8px; display: flex; align-items: center; justify-content: center;">
+              <canvas id="waveformCanvas" width="280" height="70" style="width: 100%; height: 70px; display: block;"></canvas>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="inspectStartTime">Start Pacing (ms)</label>
+            <input type="number" id="inspectStartTime" min="0" max="10000" step="100" style="font-family: monospace;">
+          </div>
+
+          <div class="form-group">
+            <label>Driver Output Channel</label>
+            <select id="inspectTrack">
+              <option value="L">Index LRA</option>
+              <option value="R">Thumb LRA</option>
+            </select>
+          </div>
+
+          <!-- Dynamic modifier intensity family bundler grid -->
+          <div class="form-group" id="intensitySection">
+            <label>Variant Intensity Tiers</label>
+            <div class="intensity-grid" id="intensityTiersGrid">
+              <!-- Rendered dynamically matching the preset's family group -->
+            </div>
+            <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px; line-height: 1.3;">
+              🔄 Bundled preset indices represent relative physical power levels inside the family group.
+            </div>
+          </div>
+
+          <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+            <button id="inspectTestBtn" class="btn" style="border-color: var(--color-cyan-glow); color: var(--color-cyan); font-weight: 600; display: flex; align-items: center; justify-content: center;">
+              ⚡ Live-Test Play Node
+            </button>
+            <button id="inspectDeleteBtn" class="btn btn-delete" style="display: flex; align-items: center; justify-content: center;">
+              🗑️ Delete Block
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

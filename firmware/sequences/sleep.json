@@ -1,0 +1,218 @@
+{
+  "version": 1,
+  "totalDuration": 19000,
+  "tracks": {
+    "L": [
+      {
+        "startTime": 600,
+        "presetId": 1
+      },
+      {
+        "startTime": 1100,
+        "presetId": 1
+      },
+      {
+        "startTime": 1500,
+        "presetId": 1
+      },
+      {
+        "startTime": 1700,
+        "presetId": 1
+      },
+      {
+        "startTime": 1800,
+        "presetId": 1
+      },
+      {
+        "startTime": 1900,
+        "presetId": 1
+      },
+      {
+        "startTime": 2000,
+        "presetId": 1
+      },
+      {
+        "startTime": 2100,
+        "presetId": 1
+      },
+      {
+        "startTime": 2200,
+        "presetId": 1
+      },
+      {
+        "startTime": 2300,
+        "presetId": 1
+      },
+      {
+        "startTime": 2400,
+        "presetId": 1
+      },
+      {
+        "startTime": 2600,
+        "presetId": 1
+      },
+      {
+        "startTime": 2800,
+        "presetId": 1
+      },
+      {
+        "startTime": 3100,
+        "presetId": 1
+      },
+      {
+        "startTime": 11000,
+        "presetId": 15
+      },
+      {
+        "startTime": 3500,
+        "presetId": 1
+      },
+      {
+        "startTime": 4000,
+        "presetId": 53
+      },
+      {
+        "startTime": 6000,
+        "presetId": 53
+      },
+      {
+        "startTime": 7500,
+        "presetId": 53
+      },
+      {
+        "startTime": 8500,
+        "presetId": 53
+      },
+      {
+        "startTime": 9300,
+        "presetId": 53
+      },
+      {
+        "startTime": 9900,
+        "presetId": 53
+      },
+      {
+        "startTime": 0,
+        "presetId": 1
+      },
+      {
+        "startTime": 10400,
+        "presetId": 53
+      },
+      {
+        "startTime": 13500,
+        "presetId": 15
+      }
+    ],
+    "R": [
+      {
+        "startTime": 0,
+        "presetId": 1
+      },
+      {
+        "startTime": 600,
+        "presetId": 1
+      },
+      {
+        "startTime": 1100,
+        "presetId": 1
+      },
+      {
+        "startTime": 1500,
+        "presetId": 1
+      },
+      {
+        "startTime": 1700,
+        "presetId": 1
+      },
+      {
+        "startTime": 1800,
+        "presetId": 1
+      },
+      {
+        "startTime": 1900,
+        "presetId": 1
+      },
+      {
+        "startTime": 2000,
+        "presetId": 1
+      },
+      {
+        "startTime": 2100,
+        "presetId": 1
+      },
+      {
+        "startTime": 2200,
+        "presetId": 1
+      },
+      {
+        "startTime": 2300,
+        "presetId": 1
+      },
+      {
+        "startTime": 2400,
+        "presetId": 1
+      },
+      {
+        "startTime": 2600,
+        "presetId": 1
+      },
+      {
+        "startTime": 2800,
+        "presetId": 1
+      },
+      {
+        "startTime": 3100,
+        "presetId": 1
+      },
+      {
+        "startTime": 11000,
+        "presetId": 15
+      },
+      {
+        "startTime": 16600,
+        "presetId": 16
+      },
+      {
+        "startTime": 3500,
+        "presetId": 1
+      },
+      {
+        "startTime": 4000,
+        "presetId": 53
+      },
+      {
+        "startTime": 9300,
+        "presetId": 53
+      },
+      {
+        "startTime": 8500,
+        "presetId": 53
+      },
+      {
+        "startTime": 7500,
+        "presetId": 53
+      },
+      {
+        "startTime": 6000,
+        "presetId": 53
+      },
+      {
+        "startTime": 9900,
+        "presetId": 53
+      },
+      {
+        "startTime": 10400,
+        "presetId": 53
+      },
+      {
+        "startTime": 13500,
+        "presetId": 15
+      },
+      {
+        "startTime": 16600,
+        "presetId": 16
+      }
+    ]
+  }
+}
