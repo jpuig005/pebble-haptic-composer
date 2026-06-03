@@ -67,6 +67,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let pebblePatterns = [];
   let tempPebblePatterns = [];
   let selectedPatternIdx = null;
+  let isLoadingPattern = false;
 
   const pebbleConnectionBadge = document.getElementById("pebbleConnectionBadge");
   const pebblePatternsContainer = document.getElementById("pebblePatternsContainer");
@@ -274,11 +275,14 @@ document.addEventListener("DOMContentLoaded", () => {
       card.style.setProperty("--led-color", hex);
       card.style.setProperty("--led-glow", hex + "80");
 
+      const isDirty = pattern.isDirty;
+      const dirtyBadge = isDirty ? ` <span style="color: var(--color-amber); font-size: 8px; font-weight: 700; margin-left: 6px; background: rgba(229,169,59,0.1); padding: 1px 4px; border-radius: 3px; border: 1px solid rgba(229,169,59,0.2); letter-spacing: 0.3px;">MODIFIED</span>` : "";
+
       card.innerHTML = `
         <div class="pattern-card-meta">
           <div class="pattern-card-led"></div>
           <div class="pattern-card-details">
-            <span class="pattern-card-name">${pattern.name || "Untitled"}</span>
+            <span class="pattern-card-name" style="display: flex; align-items: center;">${pattern.name || "Untitled"}${dirtyBadge}</span>
             <span class="pattern-card-duration">${(pattern.durationMs / 1000).toFixed(1)}s loop (${pattern.events.length} event${pattern.events.length !== 1 ? 's' : ''})</span>
           </div>
         </div>
@@ -289,7 +293,29 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
       `;
 
-      card.addEventListener("click", () => {
+      card.addEventListener("click", async () => {
+        if (selectedPatternIdx !== null && selectedPatternIdx !== pattern.index && pebblePatterns[selectedPatternIdx]?.isDirty) {
+          const pushFirst = confirm(`The pattern "${pebblePatterns[selectedPatternIdx].name}" has unsaved changes.\n\nWould you like to Push/Sync these changes to your Pebble device first?`);
+          if (pushFirst) {
+            const currentSelected = pebblePatterns[selectedPatternIdx];
+            const rgb = hexToRgb(patternColorInput.value) || { r: 255, g: 255, b: 255 };
+            const duration = parseInt(patternDurationInput.value) || 5000;
+            const allNodes = [...sequencer.tracks.L.nodes, ...sequencer.tracks.R.nodes];
+            allNodes.sort((a, b) => a.startTime - b.startTime);
+            const events = allNodes.map(n => ({
+              timeMs: n.startTime,
+              track: n.track,
+              presetId: n.presetId
+            }));
+
+            try {
+              await pushPatternToPebble(selectedPatternIdx, currentSelected.name, rgb.r, rgb.g, rgb.b, duration, events);
+              currentSelected.isDirty = false;
+            } catch (err) {
+              alert("Push failed, switching anyway.");
+            }
+          }
+        }
         selectPebblePattern(pattern.index);
       });
 
@@ -311,9 +337,13 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function selectPebblePattern(idx) {
+    isLoadingPattern = true;
     selectedPatternIdx = idx;
     const pattern = pebblePatterns[idx];
-    if (!pattern) return;
+    if (!pattern) {
+      isLoadingPattern = false;
+      return;
+    }
 
     // Highlight card in list
     document.querySelectorAll(".pebble-pattern-card").forEach(card => {
@@ -349,6 +379,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     sequencer.renderAllNodes();
     sequencer.selectNode(null);
+    isLoadingPattern = false;
   }
 
   async function pushPatternToPebble(idx, name, r, g, b, durationMs, events) {
@@ -412,7 +443,8 @@ document.addEventListener("DOMContentLoaded", () => {
         colorB: b,
         durationMs: durationMs,
         eventCount: eventCount,
-        events: []
+        events: [],
+        isDirty: false
       };
     } else if (line.startsWith("P:EVENT:")) {
       const parts = line.split(":");
@@ -454,6 +486,7 @@ document.addEventListener("DOMContentLoaded", () => {
         pebblePatterns[selectedPatternIdx].colorR = rgb.r;
         pebblePatterns[selectedPatternIdx].colorG = rgb.g;
         pebblePatterns[selectedPatternIdx].colorB = rgb.b;
+        pebblePatterns[selectedPatternIdx].isDirty = true;
         updatePebblePatternsUI();
       }
     }
@@ -470,6 +503,7 @@ document.addEventListener("DOMContentLoaded", () => {
           pebblePatterns[selectedPatternIdx].colorR = rgb.r;
           pebblePatterns[selectedPatternIdx].colorG = rgb.g;
           pebblePatterns[selectedPatternIdx].colorB = rgb.b;
+          pebblePatterns[selectedPatternIdx].isDirty = true;
           updatePebblePatternsUI();
         }
       }
@@ -479,6 +513,7 @@ document.addEventListener("DOMContentLoaded", () => {
   patternNameInput.addEventListener("input", () => {
     if (selectedPatternIdx !== null && pebblePatterns[selectedPatternIdx]) {
       pebblePatterns[selectedPatternIdx].name = patternNameInput.value.trim();
+      pebblePatterns[selectedPatternIdx].isDirty = true;
       updatePebblePatternsUI();
     }
   });
@@ -489,6 +524,7 @@ document.addEventListener("DOMContentLoaded", () => {
       pebblePatterns[selectedPatternIdx].durationMs = duration;
       sequencer.setTotalDuration(duration);
       sequenceLengthInput.value = (duration / 1000).toFixed(1);
+      pebblePatterns[selectedPatternIdx].isDirty = true;
       updatePebblePatternsUI();
     }
   });
@@ -529,6 +565,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       await pushPatternToPebble(selectedPatternIdx, name, rgb.r, rgb.g, rgb.b, duration, events);
+      pebblePatterns[selectedPatternIdx].isDirty = false;
+      updatePebblePatternsUI();
       
       patternPushBtn.innerHTML = `
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><polyline points="20 6 9 17 4 12"/></svg>
