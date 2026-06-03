@@ -392,8 +392,16 @@ document.addEventListener("DOMContentLoaded", () => {
     sequencer.selectNode(null);
     sequencer.tracks.L.nodes = [];
     sequencer.tracks.R.nodes = [];
+    
+    // Zoom to fit the loaded pattern duration
+    const workspaceContainer = leftTrack.closest(".timeline-workspace-container");
+    const containerWidth = workspaceContainer ? workspaceContainer.clientWidth - 140 : 800;
+    const minPixelsPerMs = containerWidth / pattern.durationMs;
+    
     sequencer.setTotalDuration(pattern.durationMs);
+    sequencer.setZoom(minPixelsPerMs);
     sequenceLengthInput.value = (pattern.durationMs / 1000).toFixed(1);
+    syncZoomSlider();
 
     pattern.events.forEach(ev => {
       sequencer.createNode(ev.track, ev.presetId, ev.timeMs, false);
@@ -568,6 +576,7 @@ document.addEventListener("DOMContentLoaded", () => {
       sequenceLengthInput.value = (duration / 1000).toFixed(1);
       const reps = parseInt(patternRepeatsInput.value) || 60;
       updateTotalDurationLabel(duration, reps);
+      syncZoomSlider();
       selectedPattern.isDirty = true;
       updatePebblePatternsUI();
     }
