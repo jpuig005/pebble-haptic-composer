@@ -4,21 +4,6 @@
  * =============================================================================
  * Supported Hardware: Seeed Studio XIAO ESP32-S3
  * Breakout Modules: Dual Adafruit DRV2605L Haptic Controllers + 1x NeoPixel
- * * Features Dual Operational Modes:
- * 1. STANDALONE PACER MODE (Breathing Trainer & Offline Player)
- * - Cycles through Focus, Sleep, Relax, Presence, and CUSTOM breathing protocols.
- * - Uses single button clicks to choose modes, hold 1.5s to lock in.
- * - Auto deep sleep (RTC) after session ends or is cancelled.
- * * 2. LIVE COMPOSER MODE (Web Sequencer Companion)
- * - Activates instantly when a serial command arrives from the web editor.
- * - Turns NeoPixel into a breathing teal status indicator.
- * - Parses trigger packets (e.g., L:7\n or R:24\n) in a non-blocking loop.
- * - Press the button physically at any time to return to Standalone Pacer.
- * * Pinout Config (Matching physical device):
- * - Left Channel (Index LRA): Wire.begin(D4, D5)
- * - Right Channel (Thumb LRA): Wire1.begin(D3, D2, 400000U)
- * - Button Pin: D1 (WAKEUP_GPIO: GPIO 2)
- * - NeoPixel LED: D6 (NUM_PIXELS: 1)
  * =============================================================================
  */
 
@@ -27,8 +12,8 @@
 #include <Adafruit_NeoPixel.h>
 #include "driver/rtc_io.h"
 #include <math.h>
-#include <Preferences.h> // Non-volatile flash storage for custom patterns
-#include "presets_data.h" // Compiled JSON sequence data from DAW
+#include <Preferences.h>  // Non-volatile flash storage for custom patterns
+#include "presets_data.h" // Compiled default JSON sequence data from DAW
 
 // --- PIN CONFIGURATIONS ---
 #define BUTTON_PIN          D1          // Button (Primary RTC Domain)
@@ -36,29 +21,29 @@
 #define LED_PIN             D6          // NeoPixel data line
 #define NUM_PIXELS          1
 
-// --- STANDALONE BREATHING PACER INFRASTRUCTURE ---
-enum Protocol { FOCUS, SLEEP, RELAX, PRESENCE, CUSTOM, NUM_PROTOCOLS };
-Protocol currentProtocol = FOCUS;
+// --- DYNAMIC PACER INFRASTRUCTURE ---
+#define MAX_PATTERN_EVENTS 256
+#define MAX_PATTERNS 10
 
-const unsigned long protocolTimers[NUM_PROTOCOLS][4] = {
-  {4000, 4000, 4000, 4000}, // 1. FOCUS (Box Breathing: 4-4-4-4)
-  {4000, 7000, 8000,    0}, // 2. SLEEP (4-7-8)
-  {4000,    0, 6000,    0}, // 3. RELAX (4-6)
-  {5500,    0, 5500,    0}, // 4. PRESENCE (Coherence: 5.5s / 5.5s)
-  {0,       0,    0,    0}  // 5. CUSTOM (Offline play - timers not used)
-};
-
-// --- CUSTOM PACER PATTERN INFRASTRUCTURE ---
 struct HapticEvent {
   unsigned long timeMs;
   char track; // 'L' or 'R'
   byte presetId;
 };
 
-#define MAX_CUSTOM_EVENTS 512
-HapticEvent customPattern[MAX_CUSTOM_EVENTS];
-int customEventCount = 0;
-unsigned long customPatternDuration = 10000; // default 10 seconds
+struct DynamicPattern {
+  char name[32];
+  byte colorR;
+  byte colorG;
+  byte colorB;
+  unsigned long durationMs;
+  int eventCount;
+  HapticEvent events[MAX_PATTERN_EVENTS];
+};
+
+DynamicPattern activePatterns[MAX_PATTERNS];
+int activePatternCount = 0;
+int currentPatternIndex = 0;
 
 Preferences preferences;
 
@@ -68,7 +53,7 @@ Adafruit_DRV2605 drvRight;
 Adafruit_NeoPixel pixel(NUM_PIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // --- COMPOSER SERIAL PROTOCOL BUFFERS ---
-#define BUFFER_SIZE 64
+#define BUFFER_SIZE 128
 char serialBuffer[BUFFER_SIZE];
 int bufferIndex = 0;
 
@@ -79,15 +64,16 @@ unsigned long lastComposerSignalTime = 0;
 // --- FUNCTION PROTOTYPES ---
 void initHardware();
 void runProtocolSelectionMenu();
-void runBreathingEngine();
-void runCustomPatternEngine();
+void runActivePatternEngine();
 void runLiveComposerLoop();
 void parseSerialCommand(char* cmd);
 void updateMenuVisuals();
-void printCurrentProtocolName();
 void confirmSelectionFlash();
 void triggerBoth(int id);
 void goToDeepSleep();
+void loadPatternsFromFlash();
+void savePatternsToFlash();
+void loadFactoryDefaults();
 
 void setup() {
   Serial.begin(115200);
@@ -105,23 +91,13 @@ void setup() {
   
   initHardware();
 
-  // Load custom offline pattern from NVS flash
-  preferences.begin("haptics", true); // Open namespace 'haptics' in read-only
-  customEventCount = preferences.getInt("count", 0);
-  customPatternDuration = preferences.getLong("duration", 10000);
-  if (customEventCount > 0 && customEventCount <= MAX_CUSTOM_EVENTS) {
-    preferences.getBytes("pattern", customPattern, sizeof(customPattern));
-  }
-  preferences.end();
-
-  Serial.print("[BOOT] Loaded custom offline events: ");
-  Serial.println(customEventCount);
+  // Load custom patterns from NVS flash
+  loadPatternsFromFlash();
 
   updateMenuVisuals();
 }
 
 void loop() {
-  // If we receive a command from the serial port, go straight to Live Composer Mode
   if (liveComposerActive) {
     runLiveComposerLoop();
   } else {
@@ -131,12 +107,8 @@ void loop() {
     // Check if Menu exited due to serial activation
     if (liveComposerActive) return;
 
-    // 2. Run the standalone breathing or custom pacer session
-    if (currentProtocol == CUSTOM) {
-      runCustomPatternEngine();
-    } else {
-      runBreathingEngine();
-    }
+    // 2. Run the selected pacer session
+    runActivePatternEngine();
     
     // Check if session exited due to serial activation
     if (liveComposerActive) return;
@@ -177,7 +149,6 @@ void checkSerialComposerTraffic() {
   while (Serial.available() > 0) {
     char inChar = (char)Serial.read();
     
-    // Buffer inputs
     if (inChar == '\n' || inChar == '\r') {
       if (bufferIndex > 0) {
         serialBuffer[bufferIndex] = '\0';
@@ -208,7 +179,6 @@ void runProtocolSelectionMenu() {
   Serial.println("[MENU] Connecting Pebble Haptic Composer will override this menu.");
 
   while (true) {
-    // Proactively check if Web Serial is trying to take control
     checkSerialComposerTraffic();
     if (liveComposerActive) {
       Serial.println("\n[COMPOSER] Switch detected! Hijacking menu for Web Sequencer...");
@@ -222,11 +192,13 @@ void runProtocolSelectionMenu() {
       unsigned long holdDuration = millis() - lastDebounceTime;
       
       if (holdDuration > 50 && holdDuration < 1200) { 
-        currentProtocol = static_cast<Protocol>((currentProtocol + 1) % NUM_PROTOCOLS);
-        updateMenuVisuals();
-        
-        triggerBoth(7); // Preset 7 click indicator
-        printCurrentProtocolName();
+        if (activePatternCount > 0) {
+          currentPatternIndex = (currentPatternIndex + 1) % activePatternCount;
+          updateMenuVisuals();
+          triggerBoth(7); // Preset 7 click indicator
+          Serial.print(" -> "); 
+          Serial.println(activePatterns[currentPatternIndex].name);
+        }
       }
       lastDebounceTime = millis();
     }
@@ -239,13 +211,10 @@ void runProtocolSelectionMenu() {
     // Lock Selection after a solid 1.5-second hold
     if (currentButton == LOW && (millis() - lastDebounceTime > 1500)) {
       confirmSelectionFlash();
-      
-      // Wait for button release before starting the engine to prevent immediate abort
       while (digitalRead(BUTTON_PIN) == LOW) {
         delay(10);
       }
       delay(200);
-      
       return; 
     }
 
@@ -255,24 +224,13 @@ void runProtocolSelectionMenu() {
 }
 
 void updateMenuVisuals() {
-  switch (currentProtocol) {
-    case FOCUS:    pixel.setPixelColor(0, pixel.Color(0, 0, 255));   break; // Pure Blue
-    case SLEEP:    pixel.setPixelColor(0, pixel.Color(130, 0, 255)); break; // Purple
-    case RELAX:    pixel.setPixelColor(0, pixel.Color(0, 255, 100)); break; // Emerald
-    case PRESENCE: pixel.setPixelColor(0, pixel.Color(255, 100, 0)); break; // Amber
-    case CUSTOM:   pixel.setPixelColor(0, pixel.Color(0, 240, 255)); break; // Teal/Cyan!
+  if (activePatternCount > 0 && currentPatternIndex < activePatternCount) {
+    DynamicPattern& p = activePatterns[currentPatternIndex];
+    pixel.setPixelColor(0, pixel.Color(p.colorR, p.colorG, p.colorB));
+  } else {
+    pixel.setPixelColor(0, pixel.Color(0, 0, 0));
   }
   pixel.show();
-}
-
-void printCurrentProtocolName() {
-  switch (currentProtocol) {
-    case FOCUS:    Serial.println(" -> FOCUS (Box Breathing 4-4-4-4)"); break;
-    case SLEEP:    Serial.println(" -> SLEEP (4-7-8)"); break;
-    case RELAX:    Serial.println(" -> RELAX (4-6)"); break;
-    case PRESENCE: Serial.println(" -> PRESENCE (5.5s / 5.5s)"); break;
-    case CUSTOM:   Serial.println(" -> CUSTOM (Synchronized Pattern offline)"); break;
-  }
 }
 
 void confirmSelectionFlash() {
@@ -285,176 +243,52 @@ void confirmSelectionFlash() {
   delay(500);
 }
 
-/// --- THE REFINED Standalone PACER ENGINE (Unified static sequence player) ---
-void runBreathingEngine() {
-  const PresetEvent* events = nullptr;
-  int eventCount = 0;
-  unsigned long duration = 0;
-  String name = "";
-  
-  switch (currentProtocol) {
-    case FOCUS:
-      events = BOX_EVENTS;
-      eventCount = BOX_EVENT_COUNT;
-      duration = BOX_DURATION;
-      name = "FOCUS (Box)";
-      break;
-    case SLEEP:
-      events = SLEEP_EVENTS;
-      eventCount = SLEEP_EVENT_COUNT;
-      duration = SLEEP_DURATION;
-      name = "SLEEP";
-      break;
-    case RELAX:
-      events = RELAX_EVENTS;
-      eventCount = RELAX_EVENT_COUNT;
-      duration = RELAX_DURATION;
-      name = "RELAX";
-      break;
-    case PRESENCE:
-      events = PRESENCE_EVENTS;
-      eventCount = PRESENCE_EVENT_COUNT;
-      duration = PRESENCE_DURATION;
-      name = "PRESENCE (Coherent)";
-      break;
-    default:
-      return;
-  }
+// --- THE REFINED DYNAMIC PACER ENGINE ---
+void runActivePatternEngine() {
+  if (activePatternCount <= 0 || currentPatternIndex >= activePatternCount) return;
 
   unsigned long sessionStart = millis();
   unsigned long totalSessionDuration = 600000UL; // 10 Minutes Pacing session
   unsigned long lastElapsed = 0;
   
-  Serial.print("[ENGINE] Running custom compiled standalone sequence: ");
-  Serial.println(name);
-
-  while (millis() - sessionStart < totalSessionDuration) {
-    // Proactively check if Web Serial is trying to hijack
-    checkSerialComposerTraffic();
-    if (liveComposerActive) {
-      Serial.println("\n[COMPOSER] Command received! Aborting standalone session for Web Sequencer...");
-      return; 
-    }
-
-    unsigned long now = millis();
-    if (eventCount == 0 || duration == 0) {
-      // Fallback empty breathe visual
-      float breathVal = (sin((float)(now - sessionStart) / 500.0) + 1.0) / 2.0;
-      pixel.setPixelColor(0, pixel.Color(0, 50 + round(breathVal * 50), 100 + round(breathVal * 100)));
-      pixel.show();
-    } else {
-      unsigned long elapsed = (now - sessionStart) % duration;
-      
-      // Check loop rollover
-      bool rolledOver = elapsed < lastElapsed;
-
-      // Loop through events and fire them when crossed in time
-      for (int i = 0; i < eventCount; i++) {
-        // Read struct from PROGMEM (Flash Memory) securely to shield RAM
-        unsigned long evTime = pgm_read_dword(&(events[i].timeMs));
-        char evTrack = pgm_read_byte(&(events[i].track));
-        byte evPreset = pgm_read_byte(&(events[i].presetId));
-        
-        if (evPreset == 0) continue; // Skip empty structural padding
-        
-        bool trigger = false;
-
-        if (rolledOver) {
-          // Rolled over: trigger if event is after lastElapsed OR before current elapsed
-          if (evTime >= lastElapsed || evTime < elapsed) {
-            trigger = true;
-          }
-        } else {
-          // Standard progression: trigger if event is crossed between lastElapsed and current elapsed
-          if (evTime >= lastElapsed && evTime < elapsed) {
-            trigger = true;
-          }
-        }
-
-        if (trigger) {
-          if (evTrack == 'L') {
-            drvLeft.setWaveform(0, evPreset);
-            drvLeft.setWaveform(1, 0);
-            drvLeft.go();
-          } else if (evTrack == 'R') {
-            drvRight.setWaveform(0, evPreset);
-            drvRight.setWaveform(1, 0);
-            drvRight.go();
-          }
-        }
-      }
-      lastElapsed = elapsed;
-    }
-
-    // Debounced abort button detector
-    if (digitalRead(BUTTON_PIN) == LOW) {
-      delay(150); 
-      if (digitalRead(BUTTON_PIN) == LOW) {
-        Serial.println("[ABORT] Session cancelled.");
-        triggerBoth(47); delay(100); triggerBoth(47); 
-        
-        // Wait for button release
-        while (digitalRead(BUTTON_PIN) == LOW) {
-          delay(10);
-        }
-        delay(200);
-
-        updateMenuVisuals();
-        return; 
-      }
-    }
-    delay(1); 
-  }
+  DynamicPattern& p = activePatterns[currentPatternIndex];
+  Serial.print("[ENGINE] Running custom pacer: ");
+  Serial.println(p.name);
   
-  Serial.println("[COMPLETE] Session finished naturally.");
-  triggerBoth(11); delay(200); triggerBoth(11);
-}
-
-// --- DYNAMIC CUSTOM PATTERN ENGINE ---
-void runCustomPatternEngine() {
-  unsigned long sessionStart = millis();
-  unsigned long totalSessionDuration = 600000UL; // 10 Minutes Pacing session
-  unsigned long lastElapsed = 0;
-
-  Serial.println("[ENGINE] Running custom offline haptic sequence...");
-  
-  // Set NeoPixel status: static Teal glow to show offline custom mode
-  pixel.setPixelColor(0, pixel.Color(0, 240, 255));
+  pixel.setPixelColor(0, pixel.Color(p.colorR, p.colorG, p.colorB));
   pixel.show();
 
   while (millis() - sessionStart < totalSessionDuration) {
-    // Proactively check if Web Serial is trying to hijack
     checkSerialComposerTraffic();
     if (liveComposerActive) {
-      Serial.println("\n[COMPOSER] Command received! Aborting custom session for Web Sequencer...");
+      Serial.println("\n[COMPOSER] Command received! Aborting session for Web Sequencer...");
       return; 
     }
 
     unsigned long now = millis();
-
-    if (customEventCount == 0) {
-      // Empty pattern - just idle breathe NeoPixel
+    if (p.eventCount == 0 || p.durationMs == 0) {
+      // Fallback empty breathe visual (breathing color pattern)
       float breathVal = (sin((float)(now - sessionStart) / 500.0) + 1.0) / 2.0;
-      pixel.setPixelColor(0, pixel.Color(0, 50 + round(breathVal * 50), 100 + round(breathVal * 100)));
+      pixel.setPixelColor(0, pixel.Color(
+        round(p.colorR * 0.2 + p.colorR * 0.8 * breathVal),
+        round(p.colorG * 0.2 + p.colorG * 0.8 * breathVal),
+        round(p.colorB * 0.2 + p.colorB * 0.8 * breathVal)
+      ));
       pixel.show();
     } else {
-      unsigned long elapsed = (now - sessionStart) % customPatternDuration;
-      
-      // Check loop rollover
+      unsigned long elapsed = (now - sessionStart) % p.durationMs;
       bool rolledOver = elapsed < lastElapsed;
 
       // Loop through events and fire them when crossed in time
-      for (int i = 0; i < customEventCount; i++) {
-        HapticEvent& ev = customPattern[i];
+      for (int i = 0; i < p.eventCount; i++) {
+        HapticEvent& ev = p.events[i];
         bool trigger = false;
 
         if (rolledOver) {
-          // Rolled over: trigger if event is after lastElapsed OR before current elapsed
           if (ev.timeMs >= lastElapsed || ev.timeMs < elapsed) {
             trigger = true;
           }
         } else {
-          // Standard progression: trigger if event is crossed between lastElapsed and current elapsed
           if (ev.timeMs >= lastElapsed && ev.timeMs < elapsed) {
             trigger = true;
           }
@@ -475,19 +309,16 @@ void runCustomPatternEngine() {
       lastElapsed = elapsed;
     }
 
-    // Debounced abort button detector (ALWAYS checked, even if customEventCount == 0!)
+    // Debounced abort button detector
     if (digitalRead(BUTTON_PIN) == LOW) {
       delay(150); 
       if (digitalRead(BUTTON_PIN) == LOW) {
-        Serial.println("[ABORT] Custom session cancelled.");
+        Serial.println("[ABORT] Session cancelled.");
         triggerBoth(47); delay(100); triggerBoth(47); 
-        
-        // Wait for button release
         while (digitalRead(BUTTON_PIN) == LOW) {
           delay(10);
         }
         delay(200);
-
         updateMenuVisuals();
         return; 
       }
@@ -499,26 +330,22 @@ void runCustomPatternEngine() {
   triggerBoth(11); delay(200); triggerBoth(11);
 }
 
-// =============================================================================
-// --- LIVE COMPOSER OPERATIONAL ENGINE ---
-// =============================================================================
+// --- LIVE COMPOSER OPERATIONAL loop ---
 void runLiveComposerLoop() {
   Serial.println("\n[COMPOSER] System hijacked. Active Web Sequencer Live-Control Mode!");
-  
-  // Set NeoPixel status: breathing teal glow to show active web connection
   unsigned long startT = millis();
 
   while (liveComposerActive) {
     unsigned long now = millis();
 
-    // 1. Dynamic breathing Teal visual indicator on NeoPixel
-    float breathVal = (sin((float)(now - startT) / 500.0) + 1.0) / 2.0; // 0.0 to 1.0
+    // Breathing Teal visual indicator on NeoPixel
+    float breathVal = (sin((float)(now - startT) / 500.0) + 1.0) / 2.0;
     int greenVal = 80 + round(breathVal * 120);
     int blueVal = 100 + round(breathVal * 155);
     pixel.setPixelColor(0, pixel.Color(0, greenVal, blueVal));
     pixel.show();
 
-    // 2. High-speed, non-blocking serial character check
+    // High-speed, non-blocking serial check
     while (Serial.available() > 0) {
       char inChar = (char)Serial.read();
 
@@ -526,7 +353,6 @@ void runLiveComposerLoop() {
         if (bufferIndex > 0) {
           serialBuffer[bufferIndex] = '\0';
           bufferIndex = 0;
-          
           lastComposerSignalTime = now;
           parseSerialCommand(serialBuffer);
         }
@@ -539,107 +365,187 @@ void runLiveComposerLoop() {
       }
     }
 
-    // 3. Safety Watchdog: If no serial packets for 60 seconds, return to normal menu
+    // Watchdog Timeout (60s)
     if (now - lastComposerSignalTime > 60000) {
-      Serial.println("[COMPOSER] Connection timeout (60s). Exiting Live Composer Mode.");
+      Serial.println("[COMPOSER] Connection timeout. Exiting Live Composer Mode.");
       liveComposerActive = false;
-      triggerBoth(10); // alert ticks
+      triggerBoth(10);
       updateMenuVisuals();
       return;
     }
 
-    // 4. Physical button override: press button to instantly disconnect and return to menu
+    // Button exit
     if (digitalRead(BUTTON_PIN) == LOW) {
-      delay(50); // small filter
+      delay(50);
       if (digitalRead(BUTTON_PIN) == LOW) {
-        Serial.println("[COMPOSER] Button pressed! Disconnecting Web control and returning to menu.");
+        Serial.println("[COMPOSER] Disconnecting Web control...");
         liveComposerActive = false;
-        triggerBoth(12); // clean double rumble
-        
-        // Wait for button release
+        triggerBoth(12);
         while(digitalRead(BUTTON_PIN) == LOW) { delay(10); }
         delay(200);
-
         updateMenuVisuals();
         return;
       }
     }
-    
-    delay(1); // minimal task yielding
+    delay(1);
   }
 }
 
-/**
- * Decodes the incoming command and dispatches haptic commands or configures sync loading.
- * Realtime format: "L:7\n" or "R:24\n"
- * Control format: "C:CLEAR\n", "C:DUR:<durationMs>\n", "C:ADD:<timeMs>:<track>:<presetId>\n", "C:SAVE\n"
- */
+// --- DYNAMIC PATTERNS SERIAL SERIALIZER / PARSER ---
 void parseSerialCommand(char* cmd) {
   if (strlen(cmd) < 3) return;
 
   char channel = cmd[0];
   if (cmd[1] != ':') return;
 
-  // Control/Custom sync loading command path
   if (channel == 'C' || channel == 'c') {
     char* action = &cmd[2];
     
-    if (strncmp(action, "CLEAR", 5) == 0) {
-      customEventCount = 0;
-      Serial.println("[LOADER] Standalone buffer cleared.");
+    // 1. C:READ - Serializes and sends currently active patterns list to App
+    if (strncmp(action, "READ", 4) == 0) {
+      Serial.print("P:COUNT:"); Serial.println(activePatternCount);
+      for (int i = 0; i < activePatternCount; i++) {
+        DynamicPattern& p = activePatterns[i];
+        Serial.print("P:INFO:");
+        Serial.print(i); Serial.print(":");
+        Serial.print(p.name); Serial.print(":");
+        Serial.print(p.colorR); Serial.print(":");
+        Serial.print(p.colorG); Serial.print(":");
+        Serial.print(p.colorB); Serial.print(":");
+        Serial.print(p.durationMs); Serial.print(":");
+        Serial.println(p.eventCount);
+        
+        for (int j = 0; j < p.eventCount; j++) {
+          HapticEvent& ev = p.events[j];
+          Serial.print("P:EVENT:");
+          Serial.print(i); Serial.print(":");
+          Serial.print(ev.timeMs); Serial.print(":");
+          Serial.print(ev.track); Serial.print(":");
+          Serial.println(ev.presetId);
+        }
+      }
+      Serial.println("P:END");
     }
-    else if (strncmp(action, "DUR:", 4) == 0) {
-      customPatternDuration = atol(action + 4);
-      Serial.print("[LOADER] Duration set: "); Serial.println(customPatternDuration);
+    
+    // 2. C:WRITE:<i>:<name>:<r>:<g>:<b>:<durationMs>:<eventCount>
+    else if (strncmp(action, "WRITE:", 6) == 0) {
+      char* dataStr = action + 6;
+      char* token = strtok(dataStr, ":");
+      if (token) {
+        int idx = atoi(token);
+        if (idx >= 0 && idx < MAX_PATTERNS) {
+          if (idx >= activePatternCount) {
+            activePatternCount = idx + 1;
+          }
+          DynamicPattern& p = activePatterns[idx];
+          
+          token = strtok(NULL, ":");
+          if (token) {
+            strncpy(p.name, token, 31);
+            p.name[31] = '\0';
+          }
+          token = strtok(NULL, ":");
+          if (token) p.colorR = atoi(token);
+          token = strtok(NULL, ":");
+          if (token) p.colorG = atoi(token);
+          token = strtok(NULL, ":");
+          if (token) p.colorB = atoi(token);
+          token = strtok(NULL, ":");
+          if (token) p.durationMs = atol(token);
+          token = strtok(NULL, ":");
+          if (token) {
+            // Event count will accumulate during ADD_EVENT
+            p.eventCount = 0; 
+          }
+          Serial.print("[LOADER] Syncing meta for pattern ");
+          Serial.print(idx); Serial.print(": "); Serial.println(p.name);
+        }
+      }
     }
-    else if (strncmp(action, "ADD:", 4) == 0) {
-      // Format: ADD:timeMs:track:presetId (e.g. ADD:1500:L:7)
-      char* timePart = action + 4;
-      char* trackPart = strchr(timePart, ':');
-      if (trackPart) {
-        *trackPart = '\0';
-        trackPart++;
-        char* presetPart = strchr(trackPart, ':');
-        if (presetPart) {
-          *presetPart = '\0';
-          presetPart++;
+    
+    // 3. C:ADD_EVENT:<i>:<timeMs>:<track>:<presetId>
+    else if (strncmp(action, "ADD_EVENT:", 10) == 0) {
+      char* dataStr = action + 10;
+      char* token = strtok(dataStr, ":");
+      if (token) {
+        int idx = atoi(token);
+        if (idx >= 0 && idx < activePatternCount) {
+          DynamicPattern& p = activePatterns[idx];
           
-          unsigned long tMs = atol(timePart);
-          char trk = trackPart[0];
-          int pId = atoi(presetPart);
+          token = strtok(NULL, ":");
+          unsigned long timeMs = token ? atol(token) : 0;
+          token = strtok(NULL, ":");
+          char track = token ? token[0] : 'L';
+          token = strtok(NULL, ":");
+          byte presetId = token ? atoi(token) : 1;
           
-          if (customEventCount < MAX_CUSTOM_EVENTS) {
-            customPattern[customEventCount++] = { tMs, trk, (byte)pId };
+          if (p.eventCount < MAX_PATTERN_EVENTS) {
+            p.events[p.eventCount++] = { timeMs, track, presetId };
           }
         }
       }
     }
+    
+    // 4. C:SAVE
     else if (strncmp(action, "SAVE", 4) == 0) {
-      // Chronological bubble-sort to ensure linear high-speed playback sweeps
-      for (int i = 0; i < customEventCount - 1; i++) {
-        for (int j = 0; j < customEventCount - i - 1; j++) {
-          if (customPattern[j].timeMs > customPattern[j+1].timeMs) {
-            HapticEvent temp = customPattern[j];
-            customPattern[j] = customPattern[j+1];
-            customPattern[j+1] = temp;
-          }
+      savePatternsToFlash();
+      triggerBoth(12); // Confirm sync pacer double rumble
+      Serial.println("[LOADER] Patterns updated and saved in NVS.");
+    }
+    
+    // 5. C:DELETE:<i>
+    else if (strncmp(action, "DELETE:", 7) == 0) {
+      int delIdx = atoi(action + 7);
+      if (delIdx >= 0 && delIdx < activePatternCount) {
+        Serial.print("[LOADER] Deleting pattern index "); Serial.println(delIdx);
+        for (int i = delIdx; i < activePatternCount - 1; i++) {
+          activePatterns[i] = activePatterns[i + 1];
+        }
+        activePatternCount--;
+        if (currentPatternIndex >= activePatternCount) {
+          currentPatternIndex = 0;
+        }
+        savePatternsToFlash();
+        updateMenuVisuals();
+        triggerBoth(10); // double-tick alert
+      }
+    }
+    
+    // 6. C:RESET_DEFAULTS
+    else if (strncmp(action, "RESET_DEFAULTS", 14) == 0) {
+      loadFactoryDefaults();
+      currentPatternIndex = 0;
+      updateMenuVisuals();
+      triggerBoth(12);
+      Serial.println("[LOADER] Factory defaults restored.");
+      
+      // Auto report new list back
+      Serial.print("P:COUNT:"); Serial.println(activePatternCount);
+      for (int i = 0; i < activePatternCount; i++) {
+        DynamicPattern& p = activePatterns[i];
+        Serial.print("P:INFO:");
+        Serial.print(i); Serial.print(":");
+        Serial.print(p.name); Serial.print(":");
+        Serial.print(p.colorR); Serial.print(":");
+        Serial.print(p.colorG); Serial.print(":");
+        Serial.print(p.colorB); Serial.print(":");
+        Serial.print(p.durationMs); Serial.print(":");
+        Serial.println(p.eventCount);
+        for (int j = 0; j < p.eventCount; j++) {
+          HapticEvent& ev = p.events[j];
+          Serial.print("P:EVENT:");
+          Serial.print(i); Serial.print(":");
+          Serial.print(ev.timeMs); Serial.print(":");
+          Serial.print(ev.track); Serial.print(":");
+          Serial.println(ev.presetId);
         }
       }
-      
-      // Flush array to ESP32 Flash Memory (NVS Preferences)
-      preferences.begin("haptics", false);
-      preferences.putInt("count", customEventCount);
-      preferences.putLong("duration", customPatternDuration);
-      preferences.putBytes("pattern", customPattern, customEventCount * sizeof(HapticEvent));
-      preferences.end();
-      
-      Serial.print("[LOADER] Sequence synced & saved to Flash. Events: ");
-      Serial.println(customEventCount);
-      triggerBoth(12); // Short vibration confirmation double-rumble
+      Serial.println("P:END");
     }
     return;
   }
 
+  // Real-time live control execution triggers LRA
   int presetId = atoi(&cmd[2]);
   if (presetId < 1 || presetId > 123) return;
 
@@ -654,11 +560,97 @@ void parseSerialCommand(char* cmd) {
   }
 }
 
-// --- SECURE DEEP SLEEP ROUTINE ---
-void goToDeepSleep() {
-  Serial.println("[POWER] Initializing Deep Standby to conserve battery...");
-  Serial.flush();
+void loadPatternsFromFlash() {
+  preferences.begin("haptics", true); // Read-only
+  activePatternCount = preferences.getInt("count", 0);
   
+  if (activePatternCount <= 0 || activePatternCount > MAX_PATTERNS) {
+    preferences.end();
+    loadFactoryDefaults();
+  } else {
+    for (int i = 0; i < activePatternCount; i++) {
+      String key = "pat_" + String(i);
+      preferences.getBytes(key.c_str(), &activePatterns[i], sizeof(DynamicPattern));
+    }
+    preferences.end();
+    Serial.print("[FLASH] Loaded patterns list from Flash. Count: ");
+    Serial.println(activePatternCount);
+  }
+}
+
+void savePatternsToFlash() {
+  preferences.begin("haptics", false); // Read/Write
+  preferences.putInt("count", activePatternCount);
+  for (int i = 0; i < activePatternCount; i++) {
+    String key = "pat_" + String(i);
+    preferences.putBytes(key.c_str(), &activePatterns[i], sizeof(DynamicPattern));
+  }
+  preferences.end();
+  Serial.println("[FLASH] Saved patterns list to NVS Flash.");
+}
+
+void loadFactoryDefaults() {
+  Serial.println("[SYSTEM] Restoring Factory Default Pacing Patterns...");
+  activePatternCount = 4;
+  
+  // 1. FOCUS (Box Breathing)
+  strcpy(activePatterns[0].name, "Focus Pacer");
+  activePatterns[0].colorR = 0;
+  activePatterns[0].colorG = 0;
+  activePatterns[0].colorB = 255;
+  activePatterns[0].durationMs = BOX_DURATION;
+  activePatterns[0].eventCount = BOX_EVENT_COUNT;
+  for (int i = 0; i < BOX_EVENT_COUNT; i++) {
+    activePatterns[0].events[i].timeMs = pgm_read_dword(&(BOX_EVENTS[i].timeMs));
+    activePatterns[0].events[i].track = pgm_read_byte(&(BOX_EVENTS[i].track));
+    activePatterns[0].events[i].presetId = pgm_read_byte(&(BOX_EVENTS[i].presetId));
+  }
+
+  // 2. SLEEP (4-7-8)
+  strcpy(activePatterns[1].name, "Sleep Pacer");
+  activePatterns[1].colorR = 130;
+  activePatterns[1].colorG = 0;
+  activePatterns[1].colorB = 255;
+  activePatterns[1].durationMs = SLEEP_DURATION;
+  activePatterns[1].eventCount = SLEEP_EVENT_COUNT;
+  for (int i = 0; i < SLEEP_EVENT_COUNT; i++) {
+    activePatterns[1].events[i].timeMs = pgm_read_dword(&(SLEEP_EVENTS[i].timeMs));
+    activePatterns[1].events[i].track = pgm_read_byte(&(SLEEP_EVENTS[i].track));
+    activePatterns[1].events[i].presetId = pgm_read_byte(&(SLEEP_EVENTS[i].presetId));
+  }
+
+  // 3. RELAX (4-6)
+  strcpy(activePatterns[2].name, "Relax Pacer");
+  activePatterns[2].colorR = 0;
+  activePatterns[2].colorG = 255;
+  activePatterns[2].colorB = 100;
+  activePatterns[2].durationMs = RELAX_DURATION;
+  activePatterns[2].eventCount = RELAX_EVENT_COUNT;
+  for (int i = 0; i < RELAX_EVENT_COUNT; i++) {
+    activePatterns[2].events[i].timeMs = pgm_read_dword(&(RELAX_EVENTS[i].timeMs));
+    activePatterns[2].events[i].track = pgm_read_byte(&(RELAX_EVENTS[i].track));
+    activePatterns[2].events[i].presetId = pgm_read_byte(&(RELAX_EVENTS[i].presetId));
+  }
+
+  // 4. PRESENCE (Coherence)
+  strcpy(activePatterns[3].name, "Coherence Pacer");
+  activePatterns[3].colorR = 255;
+  activePatterns[3].colorG = 100;
+  activePatterns[3].colorB = 0;
+  activePatterns[3].durationMs = PRESENCE_DURATION;
+  activePatterns[3].eventCount = PRESENCE_EVENT_COUNT;
+  for (int i = 0; i < PRESENCE_EVENT_COUNT; i++) {
+    activePatterns[3].events[i].timeMs = pgm_read_dword(&(PRESENCE_EVENTS[i].timeMs));
+    activePatterns[3].events[i].track = pgm_read_byte(&(PRESENCE_EVENTS[i].track));
+    activePatterns[3].events[i].presetId = pgm_read_byte(&(PRESENCE_EVENTS[i].presetId));
+  }
+  
+  savePatternsToFlash();
+}
+
+void goToDeepSleep() {
+  Serial.println("[POWER] Initializing Deep Standby...");
+  Serial.flush();
   pixel.setPixelColor(0, pixel.Color(0, 0, 0));
   pixel.show();
   
@@ -670,7 +662,6 @@ void goToDeepSleep() {
   esp_sleep_enable_ext0_wakeup(WAKEUP_GPIO, 0); 
   rtc_gpio_pullup_en(WAKEUP_GPIO);     
   rtc_gpio_pulldown_dis(WAKEUP_GPIO);  
-
   esp_deep_sleep_start();
 }
 
