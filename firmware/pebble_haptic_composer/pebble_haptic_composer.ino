@@ -445,6 +445,8 @@ void parseSerialCommand(char* cmd) {
             activePatternCount = idx + 1;
           }
           DynamicPattern& p = activePatterns[idx];
+          p.eventCount = 0; // Reset immediately to prevent bounds crashes on partial writes
+          p.repeats = 60;   // Default fallback repeats count
           
           token = strtok(NULL, ":");
           if (token) {
@@ -578,13 +580,24 @@ void loadPatternsFromFlash() {
     preferences.end();
     loadFactoryDefaults();
   } else {
+    bool loadFailed = false;
     for (int i = 0; i < activePatternCount; i++) {
       String key = "pat_" + String(i);
-      preferences.getBytes(key.c_str(), &activePatterns[i], sizeof(DynamicPattern));
+      size_t readBytes = preferences.getBytes(key.c_str(), &activePatterns[i], sizeof(DynamicPattern));
+      if (readBytes != sizeof(DynamicPattern)) {
+        loadFailed = true;
+        break;
+      }
     }
     preferences.end();
-    Serial.print("[FLASH] Loaded patterns list from Flash. Count: ");
-    Serial.println(activePatternCount);
+    
+    if (loadFailed) {
+      Serial.println("[FLASH] NVS size mismatch or corrupted data. Restoring factory defaults...");
+      loadFactoryDefaults();
+    } else {
+      Serial.print("[FLASH] Loaded patterns list from Flash. Count: ");
+      Serial.println(activePatternCount);
+    }
   }
 }
 

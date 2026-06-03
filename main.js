@@ -68,6 +68,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let tempPebblePatterns = [];
   let selectedPatternIdx = null;
   let isLoadingPattern = false;
+  let pebbleSupportsRepeats = false;
 
   const pebbleConnectionBadge = document.getElementById("pebbleConnectionBadge");
   const pebblePatternsContainer = document.getElementById("pebblePatternsContainer");
@@ -376,6 +377,11 @@ document.addEventListener("DOMContentLoaded", () => {
     patternRepeatsInput.value = pattern.repeats || 60;
     updateTotalDurationLabel(pattern.durationMs, pattern.repeats || 60);
 
+    // Hide or show repeat input based on Pebble firmware capability
+    if (patternRepeatsInput && patternRepeatsInput.closest(".form-group")) {
+      patternRepeatsInput.closest(".form-group").style.display = pebbleSupportsRepeats ? "block" : "none";
+    }
+
     // Show pattern inspector, hide others
     inspectorEmpty.style.display = "none";
     inspectorForm.style.display = "none";
@@ -403,7 +409,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       // 1. Send C:WRITE command
-      await serialManager.writeString(`C:WRITE:${idx}:${name}:${r}:${g}:${b}:${durationMs}:${repeats}:${events.length}\n`);
+      if (pebbleSupportsRepeats) {
+        await serialManager.writeString(`C:WRITE:${idx}:${name}:${r}:${g}:${b}:${durationMs}:${repeats}:${events.length}\n`);
+      } else {
+        await serialManager.writeString(`C:WRITE:${idx}:${name}:${r}:${g}:${b}:${durationMs}:${events.length}\n`);
+      }
       await new Promise(r => setTimeout(r, 45));
 
       // 2. Send events
@@ -449,8 +459,17 @@ document.addEventListener("DOMContentLoaded", () => {
       const g = parseInt(parts[5]);
       const b = parseInt(parts[6]);
       const durationMs = parseInt(parts[7]);
-      const repeats = parseInt(parts[8]);
-      const eventCount = parseInt(parts[9]);
+      
+      let repeats = 60;
+      let eventCount = 0;
+      if (parts.length >= 10) {
+        pebbleSupportsRepeats = true;
+        repeats = parseInt(parts[8]) || 60;
+        eventCount = parseInt(parts[9]) || 0;
+      } else {
+        pebbleSupportsRepeats = false;
+        eventCount = parseInt(parts[8]) || 0;
+      }
 
       tempPebblePatterns[idx] = {
         index: idx,
