@@ -37,6 +37,7 @@ struct DynamicPattern {
   byte colorG;
   byte colorB;
   unsigned long durationMs;
+  int repeats; // Number of times to repeat the cycle
   int eventCount;
   HapticEvent events[MAX_PATTERN_EVENTS];
 };
@@ -248,10 +249,15 @@ void runActivePatternEngine() {
   if (activePatternCount <= 0 || currentPatternIndex >= activePatternCount) return;
 
   unsigned long sessionStart = millis();
-  unsigned long totalSessionDuration = 600000UL; // 10 Minutes Pacing session
-  unsigned long lastElapsed = 0;
-  
   DynamicPattern& p = activePatterns[currentPatternIndex];
+  
+  int reps = p.repeats;
+  if (reps <= 0 || reps > 2000) reps = 60; // Default fallback to 60 cycles
+  unsigned long totalSessionDuration = 600000UL;
+  if (p.durationMs > 0) {
+    totalSessionDuration = (unsigned long)reps * p.durationMs;
+  }
+  unsigned long lastElapsed = 0;
   Serial.print("[ENGINE] Running custom pacer: ");
   Serial.println(p.name);
   
@@ -413,6 +419,7 @@ void parseSerialCommand(char* cmd) {
         Serial.print(p.colorG); Serial.print(":");
         Serial.print(p.colorB); Serial.print(":");
         Serial.print(p.durationMs); Serial.print(":");
+        Serial.print(p.repeats); Serial.print(":");
         Serial.println(p.eventCount);
         
         for (int j = 0; j < p.eventCount; j++) {
@@ -452,6 +459,8 @@ void parseSerialCommand(char* cmd) {
           if (token) p.colorB = atoi(token);
           token = strtok(NULL, ":");
           if (token) p.durationMs = atol(token);
+          token = strtok(NULL, ":");
+          if (token) p.repeats = atoi(token);
           token = strtok(NULL, ":");
           if (token) {
             // Event count will accumulate during ADD_EVENT
@@ -530,6 +539,7 @@ void parseSerialCommand(char* cmd) {
         Serial.print(p.colorG); Serial.print(":");
         Serial.print(p.colorB); Serial.print(":");
         Serial.print(p.durationMs); Serial.print(":");
+        Serial.print(p.repeats); Serial.print(":");
         Serial.println(p.eventCount);
         for (int j = 0; j < p.eventCount; j++) {
           HapticEvent& ev = p.events[j];
@@ -599,6 +609,7 @@ void loadFactoryDefaults() {
   activePatterns[0].colorG = 0;
   activePatterns[0].colorB = 255;
   activePatterns[0].durationMs = BOX_DURATION;
+  activePatterns[0].repeats = 60;
   activePatterns[0].eventCount = BOX_EVENT_COUNT;
   for (int i = 0; i < BOX_EVENT_COUNT; i++) {
     activePatterns[0].events[i].timeMs = pgm_read_dword(&(BOX_EVENTS[i].timeMs));
@@ -612,6 +623,7 @@ void loadFactoryDefaults() {
   activePatterns[1].colorG = 0;
   activePatterns[1].colorB = 255;
   activePatterns[1].durationMs = SLEEP_DURATION;
+  activePatterns[1].repeats = 60;
   activePatterns[1].eventCount = SLEEP_EVENT_COUNT;
   for (int i = 0; i < SLEEP_EVENT_COUNT; i++) {
     activePatterns[1].events[i].timeMs = pgm_read_dword(&(SLEEP_EVENTS[i].timeMs));
@@ -625,6 +637,7 @@ void loadFactoryDefaults() {
   activePatterns[2].colorG = 255;
   activePatterns[2].colorB = 100;
   activePatterns[2].durationMs = RELAX_DURATION;
+  activePatterns[2].repeats = 60;
   activePatterns[2].eventCount = RELAX_EVENT_COUNT;
   for (int i = 0; i < RELAX_EVENT_COUNT; i++) {
     activePatterns[2].events[i].timeMs = pgm_read_dword(&(RELAX_EVENTS[i].timeMs));
@@ -638,6 +651,7 @@ void loadFactoryDefaults() {
   activePatterns[3].colorG = 100;
   activePatterns[3].colorB = 0;
   activePatterns[3].durationMs = PRESENCE_DURATION;
+  activePatterns[3].repeats = 60;
   activePatterns[3].eventCount = PRESENCE_EVENT_COUNT;
   for (int i = 0; i < PRESENCE_EVENT_COUNT; i++) {
     activePatterns[3].events[i].timeMs = pgm_read_dword(&(PRESENCE_EVENTS[i].timeMs));

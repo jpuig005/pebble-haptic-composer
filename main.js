@@ -79,8 +79,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const patternColorInput = document.getElementById("patternColorInput");
   const patternColorHex = document.getElementById("patternColorHex");
   const patternDurationInput = document.getElementById("patternDurationInput");
+  const patternRepeatsInput = document.getElementById("patternRepeatsInput");
+  const patternTotalDurationDisplay = document.getElementById("patternTotalDurationDisplay");
   const patternPushBtn = document.getElementById("patternPushBtn");
   const patternPlayLocallyBtn = document.getElementById("patternPlayLocallyBtn");
+  const patternRevertBtn = document.getElementById("patternRevertBtn");
   
   // Track containers
   const leftTrack = document.getElementById("leftTrack");
@@ -251,6 +254,16 @@ document.addEventListener("DOMContentLoaded", () => {
     return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
   }
 
+  function updateTotalDurationLabel(cycleMs, repeats) {
+    const totalMs = cycleMs * repeats;
+    const totalSecs = Math.round(totalMs / 1000);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    if (patternTotalDurationDisplay) {
+      patternTotalDurationDisplay.innerText = `= ${mins}m ${secs}s total`;
+    }
+  }
+
   function updatePebblePatternsUI() {
     pebblePatternsContainer.innerHTML = "";
 
@@ -300,6 +313,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (pushFirst) {
             const rgb = hexToRgb(patternColorInput.value) || { r: 255, g: 255, b: 255 };
             const duration = parseInt(patternDurationInput.value) || 5000;
+            const repeats = parseInt(patternRepeatsInput.value) || 60;
             const allNodes = [...sequencer.tracks.L.nodes, ...sequencer.tracks.R.nodes];
             allNodes.sort((a, b) => a.startTime - b.startTime);
             const events = allNodes.map(n => ({
@@ -309,7 +323,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }));
 
             try {
-              await pushPatternToPebble(selectedPatternIdx, currentSelected.name, rgb.r, rgb.g, rgb.b, duration, events);
+              await pushPatternToPebble(selectedPatternIdx, currentSelected.name, rgb.r, rgb.g, rgb.b, duration, repeats, events);
               currentSelected.isDirty = false;
             } catch (err) {
               alert("Push failed, switching anyway.");
@@ -359,6 +373,8 @@ document.addEventListener("DOMContentLoaded", () => {
     patternColorInput.value = hex;
     patternColorHex.value = hex.toUpperCase();
     patternDurationInput.value = pattern.durationMs;
+    patternRepeatsInput.value = pattern.repeats || 60;
+    updateTotalDurationLabel(pattern.durationMs, pattern.repeats || 60);
 
     // Show pattern inspector, hide others
     inspectorEmpty.style.display = "none";
@@ -382,12 +398,12 @@ document.addEventListener("DOMContentLoaded", () => {
     isLoadingPattern = false;
   }
 
-  async function pushPatternToPebble(idx, name, r, g, b, durationMs, events) {
+  async function pushPatternToPebble(idx, name, r, g, b, durationMs, repeats, events) {
     if (!serialManager.isConnected) return;
 
     try {
       // 1. Send C:WRITE command
-      await serialManager.writeString(`C:WRITE:${idx}:${name}:${r}:${g}:${b}:${durationMs}:${events.length}\n`);
+      await serialManager.writeString(`C:WRITE:${idx}:${name}:${r}:${g}:${b}:${durationMs}:${repeats}:${events.length}\n`);
       await new Promise(r => setTimeout(r, 45));
 
       // 2. Send events
@@ -433,7 +449,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const g = parseInt(parts[5]);
       const b = parseInt(parts[6]);
       const durationMs = parseInt(parts[7]);
-      const eventCount = parseInt(parts[8]);
+      const repeats = parseInt(parts[8]);
+      const eventCount = parseInt(parts[9]);
 
       tempPebblePatterns[idx] = {
         index: idx,
@@ -442,6 +459,7 @@ document.addEventListener("DOMContentLoaded", () => {
         colorG: g,
         colorB: b,
         durationMs: durationMs,
+        repeats: repeats,
         eventCount: eventCount,
         events: [],
         isDirty: false
@@ -529,6 +547,19 @@ document.addEventListener("DOMContentLoaded", () => {
       selectedPattern.durationMs = duration;
       sequencer.setTotalDuration(duration);
       sequenceLengthInput.value = (duration / 1000).toFixed(1);
+      const reps = parseInt(patternRepeatsInput.value) || 60;
+      updateTotalDurationLabel(duration, reps);
+      selectedPattern.isDirty = true;
+      updatePebblePatternsUI();
+    }
+  });
+
+  patternRepeatsInput.addEventListener("input", () => {
+    const selectedPattern = pebblePatterns.find(p => p.index === selectedPatternIdx);
+    if (selectedPatternIdx !== null && selectedPattern) {
+      const repeats = parseInt(patternRepeatsInput.value) || 60;
+      selectedPattern.repeats = repeats;
+      updateTotalDurationLabel(selectedPattern.durationMs, repeats);
       selectedPattern.isDirty = true;
       updatePebblePatternsUI();
     }
@@ -553,6 +584,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const name = patternNameInput.value.trim() || "Untitled";
     const rgb = hexToRgb(patternColorInput.value) || { r: 255, g: 255, b: 255 };
     const duration = parseInt(patternDurationInput.value) || 5000;
+    const repeats = parseInt(patternRepeatsInput.value) || 60;
 
     const allNodes = [...sequencer.tracks.L.nodes, ...sequencer.tracks.R.nodes];
     allNodes.sort((a, b) => a.startTime - b.startTime);
@@ -570,7 +602,7 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
 
     try {
-      await pushPatternToPebble(selectedPatternIdx, name, rgb.r, rgb.g, rgb.b, duration, events);
+      await pushPatternToPebble(selectedPatternIdx, name, rgb.r, rgb.g, rgb.b, duration, repeats, events);
       selectedPattern.isDirty = false;
       updatePebblePatternsUI();
       
@@ -623,13 +655,36 @@ document.addEventListener("DOMContentLoaded", () => {
     pebbleAddBtn.innerText = "Adding...";
 
     try {
-      await pushPatternToPebble(newIdx, name, 255, 255, 255, 5000, []);
+      await pushPatternToPebble(newIdx, name, 255, 255, 255, 5000, 60, []);
       selectedPatternIdx = newIdx;
     } catch (err) {
       console.error("Failed to add pattern:", err);
     } finally {
       pebbleAddBtn.disabled = false;
       pebbleAddBtn.innerText = "+ Add Pattern";
+    }
+  });
+
+  patternRevertBtn.addEventListener("click", async () => {
+    const selectedPattern = pebblePatterns.find(p => p.index === selectedPatternIdx);
+    if (selectedPatternIdx === null || !selectedPattern) return;
+    
+    if (confirm(`Are you sure you want to discard your local modifications to "${selectedPattern.name}" and reload its last synced configuration from the Pebble?`)) {
+      patternRevertBtn.disabled = true;
+      const originalText = patternRevertBtn.innerHTML;
+      patternRevertBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; animation: spin 1s linear infinite;"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>
+        Reverting...
+      `;
+      
+      try {
+        await serialManager.writeString("C:READ\n");
+      } catch (err) {
+        console.error("Revert reload failed:", err);
+      } finally {
+        patternRevertBtn.disabled = false;
+        patternRevertBtn.innerHTML = originalText;
+      }
     }
   });
 
