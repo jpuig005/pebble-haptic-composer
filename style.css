@@ -943,5 +943,151 @@ main {
   to { transform: rotate(360deg); }
 }
 
+/* Pebble Device Connection Badge & Profiles styling */
+.connection-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all var(--transition-speed) ease;
+}
+
+.connection-badge.connected {
+  background: rgba(86, 152, 144, 0.1);
+  border: 1px solid rgba(86, 152, 144, 0.3);
+  color: var(--color-teal);
+  box-shadow: 0 0 8px rgba(86, 152, 144, 0.15);
+}
+
+.connection-badge.disconnected {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+}
+
+/* On-device Pattern Cards */
+.pebble-pattern-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-speed) ease;
+}
+
+.pebble-pattern-card:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.pebble-pattern-card.active {
+  background: rgba(229, 169, 59, 0.04);
+  border-color: var(--border-active);
+  box-shadow: 0 2px 8px rgba(229, 169, 59, 0.05);
+}
+
+.pebble-pattern-card.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  background-color: var(--color-amber);
+  border-radius: 0 4px 4px 0;
+}
+
+.pattern-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pattern-card-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px var(--led-glow, transparent);
+  background-color: var(--led-color, #fff);
+  transition: all var(--transition-speed) ease;
+}
+
+.pattern-card-details {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pattern-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pattern-card-duration {
+  font-size: 9.5px;
+  color: var(--text-muted);
+  font-family: monospace;
+  margin-top: 2px;
+}
+
+.pattern-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.3;
+  transition: opacity var(--transition-speed) ease;
+}
+
+.pebble-pattern-card:hover .pattern-card-actions {
+  opacity: 1;
+}
+
+.pattern-card-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-speed) ease;
+}
+
+.pattern-card-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.pattern-card-btn.delete:hover {
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--color-ruby);
+}
+
+.connect-prompt {
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px dashed rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+}
+
 
 

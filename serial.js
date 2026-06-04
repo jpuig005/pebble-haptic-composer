@@ -7,13 +7,20 @@ class SerialManager {
   constructor() {
     this.port = null;
     this.writer = null;
+    this.reader = null;
+    this.readLoopPromise = null;
     this.encoder = new TextEncoder();
     this.isConnected = false;
     this.onStatusChangeCallback = null;
+    this.onDataCallback = null;
   }
 
   onStatusChange(callback) {
     this.onStatusChangeCallback = callback;
+  }
+
+  onData(callback) {
+    this.onDataCallback = callback;
   }
 
   _updateStatus(connected) {
@@ -39,6 +46,9 @@ class SerialManager {
       this.writer = this.port.writable.getWriter();
       this._updateStatus(true);
       
+      // Start background read loop
+      this.readLoopPromise = this._startReadLoop();
+      
       // Watch for sudden disconnections
       navigator.serial.addEventListener("disconnect", (event) => {
         if (event.port === this.port) {
@@ -60,6 +70,12 @@ class SerialManager {
    */
   async disconnect() {
     try {
+      if (this.reader) {
+        try {
+          await this.reader.cancel();
+        } catch (e) {}
+        this.reader = null;
+      }
       if (this.writer) {
         this.writer.releaseLock();
         this.writer = null;
@@ -68,11 +84,58 @@ class SerialManager {
         await this.port.close();
         this.port = null;
       }
+      if (this.readLoopPromise) {
+        await this.readLoopPromise;
+        this.readLoopPromise = null;
+      }
     } catch (err) {
       console.error("Error during serial disconnect:", err);
     } finally {
       this._updateStatus(false);
       console.log("Web Serial disconnected.");
+    }
+  }
+
+  async _startReadLoop() {
+    let buffer = "";
+    while (this.port && this.port.readable && this.isConnected) {
+      try {
+        const textDecoder = new TextDecoderStream();
+        const readableStreamClosed = this.port.readable.pipeTo(textDecoder.writable);
+        this.reader = textDecoder.readable.getReader();
+        
+        try {
+          while (this.isConnected) {
+            const { value, done } = await this.reader.read();
+            if (done) {
+              break;
+            }
+            if (value) {
+              buffer += value;
+              let boundary = buffer.indexOf("\n");
+              while (boundary !== -1) {
+                const line = buffer.substring(0, boundary).trim();
+                buffer = buffer.substring(boundary + 1);
+                if (line) {
+                  if (this.onDataCallback) {
+                    this.onDataCallback(line);
+                  }
+                }
+                boundary = buffer.indexOf("\n");
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("Serial read loop inner exception:", err);
+        } finally {
+          this.reader.releaseLock();
+          await readableStreamClosed.catch(() => {});
+        }
+      } catch (err) {
+        console.error("Serial read loop outer setup exception:", err);
+        break;
+      }
+      await new Promise(r => setTimeout(r, 100));
     }
   }
 

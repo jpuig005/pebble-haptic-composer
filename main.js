@@ -62,6 +62,29 @@ document.addEventListener("DOMContentLoaded", () => {
   const intensitySection = document.getElementById("intensitySection");
   const inspectTestBtn = document.getElementById("inspectTestBtn");
   const inspectDeleteBtn = document.getElementById("inspectDeleteBtn");
+
+  // Pebble State & UI Elements
+  let pebblePatterns = [];
+  let tempPebblePatterns = [];
+  let selectedPatternIdx = null;
+  let isLoadingPattern = false;
+  let pebbleSupportsRepeats = false;
+
+  const pebbleConnectionBadge = document.getElementById("pebbleConnectionBadge");
+  const pebblePatternsContainer = document.getElementById("pebblePatternsContainer");
+  const pebbleAddBtn = document.getElementById("pebbleAddBtn");
+  const pebbleResetBtn = document.getElementById("pebbleResetBtn");
+
+  const patternInspectorForm = document.getElementById("patternInspectorForm");
+  const patternNameInput = document.getElementById("patternNameInput");
+  const patternColorInput = document.getElementById("patternColorInput");
+  const patternColorHex = document.getElementById("patternColorHex");
+  const patternDurationInput = document.getElementById("patternDurationInput");
+  const patternRepeatsInput = document.getElementById("patternRepeatsInput");
+  const patternTotalDurationDisplay = document.getElementById("patternTotalDurationDisplay");
+  const patternPushBtn = document.getElementById("patternPushBtn");
+  const patternPlayLocallyBtn = document.getElementById("patternPlayLocallyBtn");
+  const patternRevertBtn = document.getElementById("patternRevertBtn");
   
   // Track containers
   const leftTrack = document.getElementById("leftTrack");
@@ -218,6 +241,517 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // --- Pebble Integration Helpers ---
+  function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+      r: parseInt(result[1], 16),
+      g: parseInt(result[2], 16),
+      b: parseInt(result[3], 16)
+    } : null;
+  }
+
+  function rgbToHex(r, g, b) {
+    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  }
+
+  function updateTotalDurationLabel(cycleMs, repeats) {
+    const totalMs = cycleMs * repeats;
+    const totalSecs = Math.round(totalMs / 1000);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    if (patternTotalDurationDisplay) {
+      patternTotalDurationDisplay.innerText = `= ${mins}m ${secs}s total`;
+    }
+  }
+
+  function updatePebblePatternsUI() {
+    pebblePatternsContainer.innerHTML = "";
+
+    if (pebblePatterns.length === 0) {
+      pebblePatternsContainer.innerHTML = `
+        <div style="color: var(--text-muted); text-align: center; font-size: 11px; padding: 20px 10px; line-height: 1.4;">
+          No custom patterns on device. Click '+ Add Pattern' to start!
+        </div>
+      `;
+      return;
+    }
+
+    pebblePatterns.forEach(pattern => {
+      const card = document.createElement("div");
+      card.className = "pebble-pattern-card";
+      card.dataset.index = pattern.index;
+      if (selectedPatternIdx === pattern.index) {
+        card.classList.add("active");
+      }
+
+      const hex = rgbToHex(pattern.colorR, pattern.colorG, pattern.colorB);
+      card.style.setProperty("--led-color", hex);
+      card.style.setProperty("--led-glow", hex + "80");
+
+      const isDirty = pattern.isDirty;
+      const dirtyBadge = isDirty ? ` <span style="color: var(--color-amber); font-size: 8px; font-weight: 700; margin-left: 6px; background: rgba(229,169,59,0.1); padding: 1px 4px; border-radius: 3px; border: 1px solid rgba(229,169,59,0.2); letter-spacing: 0.3px;">MODIFIED</span>` : "";
+
+      card.innerHTML = `
+        <div class="pattern-card-meta">
+          <div class="pattern-card-led"></div>
+          <div class="pattern-card-details">
+            <span class="pattern-card-name" style="display: flex; align-items: center;">${pattern.name || "Untitled"}${dirtyBadge}</span>
+            <span class="pattern-card-duration">${(pattern.durationMs / 1000).toFixed(1)}s loop (${pattern.events.length} event${pattern.events.length !== 1 ? 's' : ''})</span>
+          </div>
+        </div>
+        <div class="pattern-card-actions">
+          <button class="pattern-card-btn delete" title="Delete Pattern">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
+          </button>
+        </div>
+      `;
+
+      card.addEventListener("click", async () => {
+        const currentSelected = pebblePatterns.find(p => p.index === selectedPatternIdx);
+        if (selectedPatternIdx !== null && selectedPatternIdx !== pattern.index && currentSelected?.isDirty) {
+          const pushFirst = confirm(`The pattern "${currentSelected.name}" has unsaved changes.\n\nWould you like to Push/Sync these changes to your Pebble device first?`);
+          if (pushFirst) {
+            const rgb = hexToRgb(patternColorInput.value) || { r: 255, g: 255, b: 255 };
+            const duration = parseInt(patternDurationInput.value) || 5000;
+            const repeats = parseInt(patternRepeatsInput.value) || 60;
+            const allNodes = [...sequencer.tracks.L.nodes, ...sequencer.tracks.R.nodes];
+            allNodes.sort((a, b) => a.startTime - b.startTime);
+            const events = allNodes.map(n => ({
+              timeMs: n.startTime,
+              track: n.track,
+              presetId: n.presetId
+            }));
+
+            try {
+              await pushPatternToPebble(selectedPatternIdx, currentSelected.name, rgb.r, rgb.g, rgb.b, duration, repeats, events);
+              currentSelected.isDirty = false;
+            } catch (err) {
+              alert("Push failed, switching anyway.");
+            }
+          }
+        }
+        selectPebblePattern(pattern.index);
+      });
+
+      card.querySelector(".delete").addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (confirm(`Are you sure you want to delete the pattern "${pattern.name}" from your Pebble?`)) {
+          if (selectedPatternIdx === pattern.index) {
+            selectedPatternIdx = null;
+            patternInspectorForm.style.display = "none";
+            inspectorEmpty.style.display = "flex";
+            sequencer.clear();
+          }
+          await deletePebblePattern(pattern.index);
+        }
+      });
+
+      pebblePatternsContainer.appendChild(card);
+    });
+  }
+
+  function selectPebblePattern(idx) {
+    isLoadingPattern = true;
+    selectedPatternIdx = idx;
+    const pattern = pebblePatterns.find(p => p.index === idx);
+    if (!pattern) {
+      isLoadingPattern = false;
+      return;
+    }
+
+    // Highlight card in list
+    document.querySelectorAll(".pebble-pattern-card").forEach(card => {
+      card.classList.remove("active");
+      if (parseInt(card.dataset.index) === idx) {
+        card.classList.add("active");
+      }
+    });
+
+    // Populate metadata editor
+    patternNameInput.value = pattern.name;
+    const hex = rgbToHex(pattern.colorR, pattern.colorG, pattern.colorB);
+    patternColorInput.value = hex;
+    patternColorHex.value = hex.toUpperCase();
+    patternDurationInput.value = pattern.durationMs;
+    patternRepeatsInput.value = pattern.repeats || 60;
+    updateTotalDurationLabel(pattern.durationMs, pattern.repeats || 60);
+
+    // Hide or show repeat input based on Pebble firmware capability
+    if (patternRepeatsInput && patternRepeatsInput.closest(".form-group")) {
+      patternRepeatsInput.closest(".form-group").style.display = pebbleSupportsRepeats ? "block" : "none";
+    }
+
+    // Show pattern inspector, hide others
+    inspectorEmpty.style.display = "none";
+    inspectorForm.style.display = "none";
+    patternInspectorForm.style.display = "block";
+    patternPlayLocallyBtn.innerText = sequencer.isPlaying ? "⏸️ Pause Sequence" : "▶️ Play Sequence";
+
+    // Load events into DAW sequencer timeline
+    sequencer.selectNode(null);
+    sequencer.tracks.L.nodes = [];
+    sequencer.tracks.R.nodes = [];
+    
+    // Zoom to fit the loaded pattern duration
+    const workspaceContainer = leftTrack.closest(".timeline-workspace-container");
+    const containerWidth = workspaceContainer ? workspaceContainer.clientWidth - 140 : 800;
+    const minPixelsPerMs = containerWidth / pattern.durationMs;
+    
+    sequencer.setTotalDuration(pattern.durationMs);
+    sequencer.setZoom(minPixelsPerMs);
+    sequenceLengthInput.value = (pattern.durationMs / 1000).toFixed(1);
+    syncZoomSlider();
+
+    pattern.events.forEach(ev => {
+      sequencer.createNode(ev.track, ev.presetId, ev.timeMs, false);
+    });
+
+    sequencer.renderAllNodes();
+    sequencer.selectNode(null);
+    isLoadingPattern = false;
+  }
+
+  async function pushPatternToPebble(idx, name, r, g, b, durationMs, repeats, events) {
+    if (!serialManager.isConnected) return;
+
+    try {
+      // 1. Send C:WRITE command
+      if (pebbleSupportsRepeats) {
+        await serialManager.writeString(`C:WRITE:${idx}:${name}:${r}:${g}:${b}:${durationMs}:${repeats}:${events.length}\n`);
+      } else {
+        await serialManager.writeString(`C:WRITE:${idx}:${name}:${r}:${g}:${b}:${durationMs}:${events.length}\n`);
+      }
+      await new Promise(r => setTimeout(r, 45));
+
+      // 2. Send events
+      for (const ev of events) {
+        await serialManager.writeString(`C:ADD_EVENT:${idx}:${ev.timeMs}:${ev.track}:${ev.presetId}\n`);
+        await new Promise(r => setTimeout(r, 30));
+      }
+
+      // 3. Send C:SAVE command
+      await serialManager.writeString(`C:SAVE\n`);
+      await new Promise(r => setTimeout(r, 60));
+
+      // 4. Reload patterns list
+      await serialManager.writeString(`C:READ\n`);
+    } catch (err) {
+      console.error("Push pattern transaction failed:", err);
+      throw err;
+    }
+  }
+
+  async function deletePebblePattern(idx) {
+    if (!serialManager.isConnected) return;
+    try {
+      await serialManager.writeString(`C:DELETE:${idx}\n`);
+      await new Promise(r => setTimeout(r, 80));
+      await serialManager.writeString("C:READ\n");
+    } catch (e) {
+      console.error("Failed to delete pattern from Pebble:", e);
+    }
+  }
+
+  // Handle data from serial
+  function handlePebbleData(line) {
+    if (line.startsWith("P:COUNT:")) {
+      const count = parseInt(line.substring(8));
+      tempPebblePatterns = new Array(count);
+      console.log(`[Pebble Data] Expecting ${count} patterns.`);
+    } else if (line.startsWith("P:INFO:")) {
+      const parts = line.split(":");
+      const idx = parseInt(parts[2]);
+      const name = parts[3];
+      const r = parseInt(parts[4]);
+      const g = parseInt(parts[5]);
+      const b = parseInt(parts[6]);
+      const durationMs = parseInt(parts[7]);
+      
+      let repeats = 60;
+      let eventCount = 0;
+      if (parts.length >= 10) {
+        pebbleSupportsRepeats = true;
+        repeats = parseInt(parts[8]) || 60;
+        eventCount = parseInt(parts[9]) || 0;
+      } else {
+        pebbleSupportsRepeats = false;
+        eventCount = parseInt(parts[8]) || 0;
+      }
+
+      tempPebblePatterns[idx] = {
+        index: idx,
+        name: name,
+        colorR: r,
+        colorG: g,
+        colorB: b,
+        durationMs: durationMs,
+        repeats: repeats,
+        eventCount: eventCount,
+        events: [],
+        isDirty: false
+      };
+    } else if (line.startsWith("P:EVENT:")) {
+      const parts = line.split(":");
+      const idx = parseInt(parts[2]);
+      const timeMs = parseInt(parts[3]);
+      let track = parts[4].trim().toUpperCase();
+      if (track !== "L" && track !== "R") track = "L";
+      const presetId = parseInt(parts[5]);
+
+      if (tempPebblePatterns[idx]) {
+        tempPebblePatterns[idx].events.push({
+          timeMs: timeMs,
+          track: track,
+          presetId: presetId
+        });
+      }
+    } else if (line === "P:END") {
+      pebblePatterns = tempPebblePatterns.filter(p => p !== undefined);
+      console.log("[Pebble Data] Finished receiving patterns:", pebblePatterns);
+      updatePebblePatternsUI();
+      
+      if (selectedPatternIdx !== null && pebblePatterns.some(p => p.index === selectedPatternIdx)) {
+        selectPebblePattern(selectedPatternIdx);
+      } else {
+        selectedPatternIdx = null;
+        patternInspectorForm.style.display = "none";
+        inspectorEmpty.style.display = "flex";
+      }
+    }
+  }
+
+  serialManager.onData(handlePebbleData);
+
+  // Bind inspector fields
+  patternColorInput.addEventListener("input", () => {
+    patternColorHex.value = patternColorInput.value.toUpperCase();
+    const selectedPattern = pebblePatterns.find(p => p.index === selectedPatternIdx);
+    if (selectedPatternIdx !== null && selectedPattern) {
+      const rgb = hexToRgb(patternColorInput.value);
+      if (rgb) {
+        selectedPattern.colorR = rgb.r;
+        selectedPattern.colorG = rgb.g;
+        selectedPattern.colorB = rgb.b;
+        selectedPattern.isDirty = true;
+        updatePebblePatternsUI();
+      }
+    }
+  });
+
+  patternColorHex.addEventListener("input", () => {
+    let val = patternColorHex.value;
+    if (!val.startsWith("#")) val = "#" + val;
+    if (val.length === 7 && /^#[0-9A-F]{6}$/i.test(val)) {
+      patternColorInput.value = val;
+      const selectedPattern = pebblePatterns.find(p => p.index === selectedPatternIdx);
+      if (selectedPatternIdx !== null && selectedPattern) {
+        const rgb = hexToRgb(val);
+        if (rgb) {
+          selectedPattern.colorR = rgb.r;
+          selectedPattern.colorG = rgb.g;
+          selectedPattern.colorB = rgb.b;
+          selectedPattern.isDirty = true;
+          updatePebblePatternsUI();
+        }
+      }
+    }
+  });
+
+  patternNameInput.addEventListener("input", () => {
+    const selectedPattern = pebblePatterns.find(p => p.index === selectedPatternIdx);
+    if (selectedPatternIdx !== null && selectedPattern) {
+      selectedPattern.name = patternNameInput.value.trim();
+      selectedPattern.isDirty = true;
+      updatePebblePatternsUI();
+    }
+  });
+
+  patternDurationInput.addEventListener("change", () => {
+    const selectedPattern = pebblePatterns.find(p => p.index === selectedPatternIdx);
+    if (selectedPatternIdx !== null && selectedPattern) {
+      const duration = parseInt(patternDurationInput.value) || 5000;
+      selectedPattern.durationMs = duration;
+      sequencer.setTotalDuration(duration);
+      sequenceLengthInput.value = (duration / 1000).toFixed(1);
+      const reps = parseInt(patternRepeatsInput.value) || 60;
+      updateTotalDurationLabel(duration, reps);
+      syncZoomSlider();
+      selectedPattern.isDirty = true;
+      updatePebblePatternsUI();
+    }
+  });
+
+  patternRepeatsInput.addEventListener("input", () => {
+    const selectedPattern = pebblePatterns.find(p => p.index === selectedPatternIdx);
+    if (selectedPatternIdx !== null && selectedPattern) {
+      const repeats = parseInt(patternRepeatsInput.value) || 60;
+      selectedPattern.repeats = repeats;
+      updateTotalDurationLabel(selectedPattern.durationMs, repeats);
+      selectedPattern.isDirty = true;
+      updatePebblePatternsUI();
+    }
+  });
+
+  patternPlayLocallyBtn.addEventListener("click", () => {
+    if (sequencer.isPlaying) {
+      sequencer.stop();
+      patternPlayLocallyBtn.innerText = "▶️ Play Sequence";
+      playBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
+    } else {
+      sequencer.start();
+      patternPlayLocallyBtn.innerText = "⏸️ Pause Sequence";
+      playBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>`;
+    }
+  });
+
+  patternPushBtn.addEventListener("click", async () => {
+    const selectedPattern = pebblePatterns.find(p => p.index === selectedPatternIdx);
+    if (selectedPatternIdx === null || !selectedPattern) return;
+    
+    const name = patternNameInput.value.trim() || "Untitled";
+    const rgb = hexToRgb(patternColorInput.value) || { r: 255, g: 255, b: 255 };
+    const duration = parseInt(patternDurationInput.value) || 5000;
+    const repeats = parseInt(patternRepeatsInput.value) || 60;
+
+    const allNodes = [...sequencer.tracks.L.nodes, ...sequencer.tracks.R.nodes];
+    allNodes.sort((a, b) => a.startTime - b.startTime);
+    const events = allNodes.map(n => ({
+      timeMs: n.startTime,
+      track: n.track,
+      presetId: n.presetId
+    }));
+
+    patternPushBtn.disabled = true;
+    const originalText = patternPushBtn.innerHTML;
+    patternPushBtn.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; animation: spin 1s linear infinite;"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>
+      Syncing...
+    `;
+
+    try {
+      await pushPatternToPebble(selectedPatternIdx, name, rgb.r, rgb.g, rgb.b, duration, repeats, events);
+      selectedPattern.isDirty = false;
+      updatePebblePatternsUI();
+      
+      patternPushBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><polyline points="20 6 9 17 4 12"/></svg>
+        Synced!
+      `;
+      patternPushBtn.style.color = "var(--color-emerald)";
+      patternPushBtn.style.borderColor = "rgba(0, 255, 102, 0.25)";
+      patternPushBtn.style.background = "rgba(0, 255, 102, 0.08)";
+
+      setTimeout(() => {
+        patternPushBtn.innerHTML = originalText;
+        patternPushBtn.style.color = "";
+        patternPushBtn.style.borderColor = "";
+        patternPushBtn.style.background = "";
+        patternPushBtn.disabled = false;
+      }, 1500);
+    } catch (err) {
+      alert("Failed to push pattern to Pebble. Check connection.");
+      patternPushBtn.innerHTML = originalText;
+      patternPushBtn.disabled = false;
+    }
+  });
+
+  pebbleAddBtn.addEventListener("click", async () => {
+    if (!serialManager.isConnected) return;
+    if (pebblePatterns.length >= 10) {
+      alert("Pebble can store a maximum of 10 patterns.");
+      return;
+    }
+
+    // Find the lowest unused Pebble index slot (0 to 9)
+    let newIdx = -1;
+    for (let i = 0; i < 10; i++) {
+      if (!pebblePatterns.some(p => p.index === i)) {
+        newIdx = i;
+        break;
+      }
+    }
+
+    if (newIdx === -1) {
+      alert("Pebble can store a maximum of 10 patterns.");
+      return;
+    }
+
+    const name = `Pacer ${newIdx + 1}`;
+    
+    pebbleAddBtn.disabled = true;
+    pebbleAddBtn.innerText = "Adding...";
+
+    try {
+      await pushPatternToPebble(newIdx, name, 255, 255, 255, 5000, 60, []);
+      selectedPatternIdx = newIdx;
+    } catch (err) {
+      console.error("Failed to add pattern:", err);
+    } finally {
+      pebbleAddBtn.disabled = false;
+      pebbleAddBtn.innerText = "+ Add Pattern";
+    }
+  });
+
+  patternRevertBtn.addEventListener("click", async () => {
+    const selectedPattern = pebblePatterns.find(p => p.index === selectedPatternIdx);
+    if (selectedPatternIdx === null || !selectedPattern) return;
+    
+    if (confirm(`Are you sure you want to discard your local modifications to "${selectedPattern.name}" and reload its last synced configuration from the Pebble?`)) {
+      patternRevertBtn.disabled = true;
+      const originalText = patternRevertBtn.innerHTML;
+      patternRevertBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; animation: spin 1s linear infinite;"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>
+        Reverting...
+      `;
+      
+      try {
+        await serialManager.writeString("C:READ\n");
+      } catch (err) {
+        console.error("Revert reload failed:", err);
+      } finally {
+        patternRevertBtn.disabled = false;
+        patternRevertBtn.innerHTML = originalText;
+      }
+    }
+  });
+
+  pebbleResetBtn.addEventListener("click", async () => {
+    if (!serialManager.isConnected) return;
+    if (confirm("Restore Pebble to factory default pacing patterns? This wipes all custom patterns.")) {
+      selectedPatternIdx = null;
+      patternInspectorForm.style.display = "none";
+      inspectorEmpty.style.display = "flex";
+      sequencer.clear();
+      
+      try {
+        await serialManager.writeString("C:RESET_DEFAULTS\n");
+      } catch (err) {
+        console.error("Failed to send reset defaults command:", err);
+      }
+    }
+  });
+
+  // Track edits to timeline to update local events list
+  sequencer.onTimelineUpdate(() => {
+    if (isLoadingPattern) return;
+    if (selectedPatternIdx !== null) {
+      const selectedPattern = pebblePatterns.find(p => p.index === selectedPatternIdx);
+      if (selectedPattern) {
+        const allNodes = [...sequencer.tracks.L.nodes, ...sequencer.tracks.R.nodes];
+        allNodes.sort((a, b) => a.startTime - b.startTime);
+        selectedPattern.events = allNodes.map(n => ({
+          timeMs: n.startTime,
+          track: n.track,
+          presetId: n.presetId
+        }));
+        selectedPattern.durationMs = sequencer.totalDuration;
+        
+        updatePebblePatternsUI();
+      }
+    }
+  });
+
   // --- Web Serial Connections Logic ---
   serialManager.onStatusChange((isConnected) => {
     if (isConnected) {
@@ -228,7 +762,18 @@ document.addEventListener("DOMContentLoaded", () => {
       connectBtn.classList.remove("btn-primary");
       connectionStatus.className = "status-dot connected";
       syncBtn.style.display = "inline-flex";
+
+      pebbleConnectionBadge.innerText = "Connected";
+      pebbleConnectionBadge.className = "connection-badge connected";
+      pebbleAddBtn.style.display = "inline-flex";
+      pebbleResetBtn.style.display = "inline-flex";
+      
       console.log("UI updated to connected state.");
+
+      // Request Pebble patterns list
+      setTimeout(() => {
+        serialManager.writeString("C:READ\n");
+      }, 500); // 500ms delay to allow device to establish connection handshake
     } else {
       connectBtn.innerHTML = `
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
@@ -237,6 +782,21 @@ document.addEventListener("DOMContentLoaded", () => {
       connectBtn.classList.add("btn-primary");
       connectionStatus.className = "status-dot";
       syncBtn.style.display = "none";
+
+      pebbleConnectionBadge.innerText = "Disconnected";
+      pebbleConnectionBadge.className = "connection-badge disconnected";
+      pebbleAddBtn.style.display = "none";
+      pebbleResetBtn.style.display = "none";
+      pebblePatterns = [];
+      selectedPatternIdx = null;
+      pebblePatternsContainer.innerHTML = `
+        <div class="connect-prompt" style="color: var(--text-muted); text-align: center; font-size: 11.5px; padding: 20px 10px; line-height: 1.4;">
+          Connect your Pebble device to manage on-device custom patterns in real-time.
+        </div>
+      `;
+      patternInspectorForm.style.display = "none";
+      inspectorEmpty.style.display = "flex";
+
       console.log("UI updated to disconnected state.");
     }
   });
@@ -255,66 +815,11 @@ document.addEventListener("DOMContentLoaded", () => {
       alert("Pebble device is not connected.");
       return;
     }
-
-    const allNodes = [...sequencer.tracks.L.nodes, ...sequencer.tracks.R.nodes];
-    
-    // Sort chronologically by time to play back linearly
-    allNodes.sort((a, b) => a.startTime - b.startTime);
-
-    // Disable sync button and show loading spinner animation
-    syncBtn.disabled = true;
-    const originalHtml = syncBtn.innerHTML;
-    syncBtn.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; animation: spin 1s linear infinite;"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>
-      Syncing...
-    `;
-
-    try {
-      // 1. CLEAR command to wipe load buffer
-      await serialManager.writeString("C:CLEAR\n");
-      await new Promise(r => setTimeout(r, 20)); // Brief pacing delay
-
-      // 2. Set DURATION command
-      await serialManager.writeString(`C:DUR:${sequencer.totalDuration}\n`);
-      await new Promise(r => setTimeout(r, 20));
-
-      // 3. Stream ADD haptic events
-      for (const node of allNodes) {
-        const track = node.track;
-        const time = node.startTime;
-        const presetId = node.presetId;
-
-        await serialManager.writeString(`C:ADD:${time}:${track}:${presetId}\n`);
-        await new Promise(r => setTimeout(r, 15)); // Pacing delay to prevent ESP32 buffer overflows
-      }
-
-      // 4. Send SAVE command
-      await serialManager.writeString("C:SAVE\n");
-      await new Promise(r => setTimeout(r, 20));
-
-      // Successful sync visual feedback
-      syncBtn.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><polyline points="20 6 9 17 4 12"/></svg>
-        Synced!
-      `;
-      syncBtn.style.color = "var(--color-emerald)";
-      syncBtn.style.borderColor = "rgba(0, 255, 102, 0.25)";
-      syncBtn.style.background = "rgba(0, 255, 102, 0.08)";
-
-      setTimeout(() => {
-        syncBtn.innerHTML = originalHtml;
-        syncBtn.style.color = "var(--color-cyan)";
-        syncBtn.style.borderColor = "rgba(0, 240, 255, 0.25)";
-        syncBtn.style.background = "rgba(0, 240, 255, 0.08)";
-        syncBtn.disabled = false;
-      }, 2000);
-
-    } catch (err) {
-      console.error("Pattern sync failed:", err);
-      alert("Failed to sync pattern. Check serial connection.");
-      syncBtn.innerHTML = originalHtml;
-      syncBtn.disabled = false;
+    if (selectedPatternIdx === null) {
+      alert("Please select a pattern from the 'Pebble Patterns' list on the left to sync.");
+      return;
     }
+    patternPushBtn.click();
   });
 
   // --- Playback Actions ---
@@ -564,18 +1069,23 @@ document.addEventListener("DOMContentLoaded", () => {
     fileInput.value = "";
   });
 
-  // --- Sequencer Inspector Interactivity ---
   sequencer.onSelectionChange((node, selectedList) => {
     const list = selectedList || (node ? [node] : []);
 
     if (list.length === 0) {
-      // Hide Inspector form, show empty slate
-      inspectorEmpty.style.display = "flex";
-      inspectorForm.style.display = "none";
+      if (selectedPatternIdx !== null) {
+        inspectorEmpty.style.display = "none";
+        inspectorForm.style.display = "none";
+        patternInspectorForm.style.display = "block";
+      } else {
+        inspectorEmpty.style.display = "flex";
+        inspectorForm.style.display = "none";
+        patternInspectorForm.style.display = "none";
+      }
       return;
     }
 
-    // Populate standard inspector values
+    patternInspectorForm.style.display = "none";
     inspectorEmpty.style.display = "none";
     inspectorForm.style.display = "block";
 
